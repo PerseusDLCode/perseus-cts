@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE TEI [
+  <!ENTITY ae "ae">
+  <!ENTITY Ae "Ae">
+]>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Epistulae ad Atticum</title>
+        <author>Cicero</author>
+      </titleStmt>
+      <publicationStmt><p>Test</p></publicationStmt>
+      <sourceDesc><p>Test</p></sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text xml:lang="lat">
+    <body>
+      <div type="edition" n="urn:cts:latinLit:phi0474.phi057.perseus-lat2">
+        <milestone unit="section" n="1"/>
+        <p>Lucio Iulio C&ae;sare Gaio Marcio Figulo consulibus.</p>
+        <milestone unit="section" n="2"/>
+        <p>&Ae;stas iam pr&ae;teriit; nunc de rebus mihi scribis.</p>
+      </div>
+    </body>
+  </text>
+</TEI>

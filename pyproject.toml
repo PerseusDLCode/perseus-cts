@@ -1,0 +1,62 @@
+[project]
+name = "perseus-cts"
+version = "0.1.0"
+description = "CTS resolver, chunker, and TEI document models for the Perseus Digital Library"
+authors = [
+    {name = "Cliff Wulfman", email = "cwulfman@princeton.edu"},
+    {name = "Charles Pletcher", email = "charles.pletcher@gmail.com"},
+]
+dependencies = ["lxml>=6.0.4", "lxml-stubs>=0.5.1"]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
+editable-backend = "path"
+
+[tool.pdm.scripts]
+test = "python -m pytest"
+test_verbose = "python -m pytest -v"
+cov = "python -m pytest --cov=perseus_cts --cov-report=html"
+lint = "python -m ruff check"
+typecheck = "python -m mypy src/perseus_cts"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "--cov=perseus_cts --cov-report=term-missing"
+
+[tool.ruff]
+exclude = []
+
+[tool.coverage.run]
+source = ["src/perseus_cts"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.1.0",
+    "ruff>=0.11.3",
+    "mypy>=1.15.0",
+]
