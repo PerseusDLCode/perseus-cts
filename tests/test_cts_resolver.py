@@ -104,6 +104,35 @@ def thucydides_parser(thucydides_doc):
     return ReferenceParser(thucydides_doc)
 
 
+BAD_DELIM_BASE = "urn:cts:greekLit:tlg0000.tlg000.test-grc1"
+
+BAD_DELIM_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="section" delim="." match="tei:div[@type='textpart']" use="@n"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{BAD_DELIM_BASE}">
+          <div type="textpart" n="1"><p>text</p></div>
+        </body>
+      </text>
+    </TEI>
+"""
+
+
+def test_first_level_dot_delim_raises(tmp_path):
+    doc = LenientTEIDocument(write_xml(tmp_path, BAD_DELIM_XML))
+    with pytest.raises(ConfigurationError, match="delim"):
+        ReferenceParser(doc)
+
+
 class TestApologyConstructor:
 
     def test_no_default_single_cs_succeeds(self, tmp_path):

@@ -125,6 +125,14 @@ class CTSResolver:
             self._doc_prefix = '_doc'
             self._ns_map = {**NS, '_doc': doc_ns}
 
+        for _cs in self._root_cs.xpath("tei:citeStructure", namespaces=NS):
+            _explicit = _cs.get("delim")
+            if _explicit is not None and _explicit != ":":
+                raise ConfigurationError(
+                    f"First-level citeStructure declares delim={_explicit!r}; "
+                    f"must be ':' (CTS passage separator)"
+                )
+
     def _match(self, expr: str, context: etree._Element) -> list:
         """Evaluate a citeStructure match expression against context."""
         return context.xpath(
