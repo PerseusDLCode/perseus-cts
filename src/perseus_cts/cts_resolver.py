@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -8,8 +9,20 @@ from typing import Optional
 from lxml import etree
 
 from perseus_cts.models import CitationChunk, CitationRecord
-from perseus_cts.constants import NS, XML_BASE, XML_ID
+from perseus_cts.constants import NS, TEI_NS
 from perseus_cts.models.document import LenientTEIDocument
+
+
+_QUOTE = re.compile(r'(["\'][^"\']*["\'])')
+_BARE_ELEMENT = re.compile(r'(?<![:\w@])([A-Za-z_][A-Za-z0-9_\-]*)(?![\w\-:(])')
+
+
+def _prefix_match_expr(expr: str, prefix: str) -> str:
+    """Prefix bare element names in a citeStructure @match expression."""
+    parts = _QUOTE.split(expr)
+    for i in range(0, len(parts), 2):
+        parts[i] = _BARE_ELEMENT.sub(rf'{prefix}:\1', parts[i])
+    return ''.join(parts)
 
 
 def copy_before(
@@ -72,80 +85,75 @@ class CitationError(Exception):
 
 
 class CTSResolver:
+
     def __init__(
         self,
         tei_doc: LenientTEIDocument,
-        refsDecl_id: str | None = None,
+        refsDecl_id: str = "CTS",
     ) -> None:
         root = tei_doc.root
 
-        body = root.find(".//tei:body", NS)
-        if body is None:
-            raise ConfigurationError("No <body> element found in document")
-        self._body = body
+        try:
+            self._base_urn = root.xpath(
+                "/tei:TEI/tei:text/tei:body/@xml:base",
+                namespaces=NS,
+            )[0]
+        except IndexError:
+            raise ConfigurationError("Base CTS URN not declared on tei:body/@xml:base")
 
-        self._base_urn = body.get(XML_BASE, "")
-        if not self._base_urn:
+        try:
+            self._root_cs = root.xpath(
+                f"/tei:TEI/tei:teiHeader/tei:encodingDesc"
+                f"/tei:refsDecl[@xml:id='{refsDecl_id}']/tei:citeStructure",
+                namespaces=NS,
+            )[0]
+        except IndexError:
             raise ConfigurationError(
-                "No base URN found in <body @xml:base>. "
-                "Ensure the document encodes the CTS URN as xml:base on <body>."
+                f"No refsDecl with xml:id='{refsDecl_id}' found"
             )
 
-        refs_decls = root.findall(".//tei:refsDecl", NS)
+        self._body = root.xpath(
+            "/tei:TEI/tei:text/tei:body",
+            namespaces=NS,
+        )[0]
 
-        if refsDecl_id is not None:
-            target = next(
-                (rd for rd in refs_decls if rd.get(XML_ID) == refsDecl_id),
-                None,
-            )
-            if target is None:
-                raise ConfigurationError(f"No <refsDecl> with xml:id={refsDecl_id!r}")
-            cs = target.find("tei:citeStructure", NS)
-            if cs is None:
-                raise ConfigurationError(
-                    f"<refsDecl xml:id={refsDecl_id!r}> contains no <citeStructure>"
-                )
-            self._root_cs = cs
+        doc_ns = etree.QName(self._body.tag).namespace
+        if doc_ns == TEI_NS:
+            self._doc_prefix = 'tei'
+            self._ns_map = NS
         else:
-            cs_decls = [(rd, rd.find("tei:citeStructure", NS)) for rd in refs_decls]
-            cs_decls = [(rd, cs) for rd, cs in cs_decls if cs is not None]
+            self._doc_prefix = '_doc'
+            self._ns_map = {**NS, '_doc': doc_ns}
 
-            if not cs_decls:
-                raise ConfigurationError(
-                    "No <refsDecl> with a <citeStructure> found. "
-                    "Run conversion tooling to add <citeStructure> declarations first."
-                )
-
-            defaults = [(rd, cs) for rd, cs in cs_decls if rd.get("default") == "true"]
-            if defaults:
-                self._root_cs = defaults[0][1]
-            elif len(cs_decls) == 1:
-                self._root_cs = cs_decls[0][1]
-            else:
-                raise ConfigurationError(
-                    "Multiple <refsDecl> elements contain <citeStructure>; "
-                    "supply refsDecl_id to select one explicitly."
-                )
+    def _match(self, expr: str, context: etree._Element) -> list:
+        """Evaluate a citeStructure match expression against context."""
+        return context.xpath(
+            _prefix_match_expr(expr, self._doc_prefix),
+            namespaces=self._ns_map,
+        )
 
     def resolve(self, urn: str) -> etree._Element:
         """Return the element identified by the full CTS URN."""
-        prefix = self._base_urn + ":"
-        if not urn.startswith(prefix):
-            raise CitationError(
-                f"URN base does not match document. "
-                f"Expected prefix {prefix!r}, got {urn!r}"
-            )
-        passage = urn[len(prefix):]
+
+        # split the urn into base and passage citation
+        pattern = r'^(.+):([^:]+)$'
+        m = re.match(pattern, urn)
+        if m is None:
+            raise CitationError(f"URN is not valid: {urn}")
+        
+        
+        base, passage = m.group(1), m.group(2)
+        if base != self._base_urn:
+            raise CitationError("URN base does not match document."
+                                f"Expected {self._base_urn}, got {base}")
         if not passage:
             raise CitationError(f"URN has no passage component: {urn!r}")
 
-        children = list(self._root_cs.findall("tei:citeStructure", NS))
-        if not children:
-            raise CitationError(
-                "Root <citeStructure> has no children to resolve against"
-            )
-
-        return self._resolve_passage(passage, children, self._body)
+        return self._resolve_passage(
+            passage,
+            self._root_cs.xpath("tei:citeStructure", namespaces=NS),
+            self._body,
+        )
 
     def _resolve_passage(
         self,
@@ -167,7 +175,7 @@ class CTSResolver:
         cs: etree._Element,
         context: etree._Element,
     ) -> etree._Element:
-        children = list(cs.findall("tei:citeStructure", NS))
+        children = cs.xpath("tei:citeStructure", namespaces=NS)
 
         if children:
             next_delim = children[0].get("delim", ".")
@@ -181,7 +189,7 @@ class CTSResolver:
 
         match_expr = cs.get("match", "")
         use_attr = cs.get("use", "@n")
-        candidates: list[etree._Element] = context.xpath(match_expr, namespaces=NS)
+        candidates: list[etree._Element] = self._match(match_expr, context)
 
         matched: Optional[etree._Element] = None
         if use_attr.startswith("@"):
@@ -231,9 +239,9 @@ class CTSResolver:
         parent_cs: etree._Element,
         context: etree._Element,
     ) -> Optional[list[tuple[etree._Element, etree._Element]]]:
-        for cs in parent_cs.findall("tei:citeStructure", NS):
+        for cs in parent_cs.xpath("tei:citeStructure", namespaces=NS):
             match_expr = cs.get("match", "")
-            candidates: list[etree._Element] = context.xpath(match_expr, namespaces=NS)
+            candidates: list[etree._Element] = self._match(match_expr, context)
 
             if any(cand is target for cand in candidates):
                 return [(cs, target)]
@@ -251,8 +259,9 @@ class CTSResolver:
 
     def citation_records(self, depth: int = -1) -> Iterator[CitationRecord]:
         """Yield CitationRecord objects at every citation level."""
-        children = list(self._root_cs.findall("tei:citeStructure", NS))
-        yield from self._records_recursive("", children, self._body, 0, depth)
+        yield from self._records_recursive(
+            "", self._root_cs.xpath("tei:citeStructure", namespaces=NS), self._body, 0, depth
+        )
 
     def _walk_cs(
         self,
@@ -266,8 +275,8 @@ class CTSResolver:
             use_attr = cs.get("use", "@n")
             delim = cs.get("delim", ":")
             unit = cs.get("unit", "")
-            children = list(cs.findall("tei:citeStructure", NS))
-            candidates: list[etree._Element] = context.xpath(match_expr, namespaces=NS)
+            children = cs.xpath("tei:citeStructure", namespaces=NS)
+            candidates: list[etree._Element] = self._match(match_expr, context)
             for cand in candidates:
                 val = cand.get(use_attr[1:], "") if use_attr.startswith("@") else ""
                 yield _CSNode(
@@ -305,8 +314,9 @@ class CTSResolver:
 
     def toc(self) -> list[dict]:
         """Return the full citation hierarchy as a list of nested TOC entries."""
-        children = list(self._root_cs.findall("tei:citeStructure", NS))
-        return self._toc_level("", children, self._body, 0)
+        return self._toc_level(
+            "", self._root_cs.xpath("tei:citeStructure", namespaces=NS), self._body, 0
+        )
 
     def _toc_level(
         self,
@@ -337,9 +347,10 @@ class CTSResolver:
 
     def citations(self, depth: int = -1) -> Iterator[str]:
         """Yield every resolvable CTS URN in document order."""
-        children = list(self._root_cs.findall("tei:citeStructure", NS))
         yield from (
-            r.urn for r in self._records_recursive("", children, self._body, 0, depth)
+            r.urn for r in self._records_recursive(
+                "", self._root_cs.xpath("tei:citeStructure", namespaces=NS), self._body, 0, depth
+            )
         )
 
     def chunks(self) -> Iterator[CitationChunk]:
@@ -363,7 +374,7 @@ class CTSResolver:
         attr: str,
         value: str,
     ) -> Optional[etree._Element]:
-        for cs in parent_cs.findall("tei:citeStructure", NS):
+        for cs in parent_cs.xpath("tei:citeStructure", namespaces=NS):
             if cs.get(attr) == value:
                 return cs
             found = self._find_cs_with_attr(cs, attr, value)
@@ -375,7 +386,7 @@ class CTSResolver:
         path: list[etree._Element] = []
         cs = self._root_cs
         while True:
-            children = cs.findall("tei:citeStructure", NS)
+            children = cs.xpath("tei:citeStructure", namespaces=NS)
             if not children:
                 break
             cs = children[0]
@@ -405,7 +416,7 @@ class CTSResolver:
         unit = target_cs.get("unit", "")
         delim = target_cs.get("delim", " ")
 
-        milestones: list[etree._Element] = self._body.xpath(match_expr, namespaces=NS)
+        milestones: list[etree._Element] = self._match(match_expr, self._body)
 
         def _urn(ms: etree._Element) -> str:
             val = ms.get(use_attr[1:], "") if use_attr.startswith("@") else ""
@@ -429,7 +440,7 @@ class CTSResolver:
         result: list[tuple[etree._Element, str]] = []
         self._collect_cs_elements(
             "",
-            list(self._root_cs.findall("tei:citeStructure", NS)),
+            self._root_cs.xpath("tei:citeStructure", namespaces=NS),
             self._body,
             target_cs,
             result,
