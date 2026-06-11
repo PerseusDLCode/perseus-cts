@@ -25,7 +25,7 @@ APOLOGY_XML = f"""\
     <TEI xmlns="http://www.tei-c.org/ns/1.0">
       <teiHeader>
         <encodingDesc>
-          <refsDecl xml:id="cite_by_section" default="true">
+          <refsDecl xml:id="CTS">
             <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
               <citeStructure unit="section" delim=":" match="tei:div[@type='textpart']" use="@n"/>
             </citeStructure>
@@ -49,7 +49,7 @@ THUCYDIDES_XML = f"""\
     <TEI xmlns="http://www.tei-c.org/ns/1.0">
       <teiHeader>
         <encodingDesc>
-          <refsDecl xml:id="cite_by_section" default="true">
+          <refsDecl xml:id="CTS">
             <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
               <citeStructure unit="book" delim=":" match="tei:div[@subtype='book']" use="@n">
                 <citeStructure unit="chapter" delim="." match="tei:div[@subtype='chapter']" use="@n">
@@ -112,7 +112,7 @@ class TestApologyConstructor:
             <TEI xmlns="http://www.tei-c.org/ns/1.0">
               <teiHeader>
                 <encodingDesc>
-                  <refsDecl xml:id="cite_by_section">
+                  <refsDecl xml:id="CTS">
                     <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
                       <citeStructure unit="section" delim=":" match="tei:div[@type='textpart']" use="@n"/>
                     </citeStructure>
@@ -160,7 +160,7 @@ class TestApologyConstructor:
             <TEI xmlns="http://www.tei-c.org/ns/1.0">
               <teiHeader>
                 <encodingDesc>
-                  <refsDecl xml:id="cite_by_section" default="true">
+                  <refsDecl xml:id="CTS">
                     <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
                       <citeStructure unit="section" delim=":" match="tei:div[@type='textpart']" use="@n"/>
                     </citeStructure>
@@ -183,7 +183,7 @@ class TestApologyConstructor:
             ReferenceParser(apology_doc, refsDecl_id="no_such_id")
 
     def test_explicit_refsDecl_id_selects_correct_decl(self, apology_doc):
-        assert ReferenceParser(apology_doc, refsDecl_id="cite_by_section") is not None
+        assert ReferenceParser(apology_doc, refsDecl_id="CTS") is not None
 
 
 class TestApologyResolve:
@@ -378,7 +378,7 @@ class TestTOC:
             <TEI xmlns="{TEI_NS}">
               <teiHeader>
                 <encodingDesc>
-                  <refsDecl default="true">
+                  <refsDecl xml:id="CTS">
                     <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
                       <citeStructure unit="book" delim=":" match="tei:div[@type='textpart']"/>
                     </citeStructure>
@@ -450,7 +450,7 @@ class TestChunksDivBased:
             <TEI xmlns="http://www.tei-c.org/ns/1.0">
               <teiHeader>
                 <encodingDesc>
-                  <refsDecl default="true">
+                  <refsDecl xml:id="CTS">
                     <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
                       <citeStructure unit="book" delim=":" match="tei:div[@subtype='book']" use="@n">
                         <citeStructure unit="chapter" delim="." match="tei:div[@subtype='chapter']" use="@n">
@@ -487,7 +487,7 @@ MILESTONE_XML = f"""\
     <TEI xmlns="http://www.tei-c.org/ns/1.0">
       <teiHeader>
         <encodingDesc>
-          <refsDecl default="true">
+          <refsDecl xml:id="CTS">
             <citeStructure match="//tei:milestone[@unit='card']"
                            unit="card" delim=" " use="@n" n="chunk"/>
           </refsDecl>
