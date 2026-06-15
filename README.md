@@ -11,6 +11,8 @@ CTS resolver, chunker, and TEI document models for the Perseus Digital Library.
 - **`TEIDocument` / `Corpus`** — lightweight TEI document model and corpus discovery
 - **Data models** — `CitationChunk`, `CitationRecord`, `TEIMetadata`, word/chunk index types
 
+CTSResolver handles both div-based chunking and milestone-based chunking.
+
 ## Installation
 
 ```bash
@@ -29,6 +31,12 @@ resolver = CTSResolver(doc)
 
 # Resolve a CTS URN to an XML element
 elem = resolver.resolve("urn:cts:greekLit:tlg0003.tlg001.perseus-grc2:1.1.1")
+
+# Generate a CTS URN for an XML element
+cts_urn = resolver.generate(elem)
+
+# Generate citation tree (useful for TOC)
+toc = resolver.toc()
 
 # Iterate all chunks
 for chunk in resolver.chunks():
