@@ -22,6 +22,12 @@ distribution = true
 package-dir = "src"
 editable-backend = "path"
 
+[project.scripts]
+check-corpus      = "perseus_cts.scripts.check_corpus:main"
+fix-citestructure = "perseus_cts.scripts.fix_citestructure_depth:main"
+fix-first-delim   = "perseus_cts.scripts.fix_first_level_delim:main"
+set-refsDecl-id   = "perseus_cts.scripts.set_refsDecl_xml_id:main"
+
 [tool.pdm.scripts]
 test = "python -m pytest"
 test_verbose = "python -m pytest -v"
