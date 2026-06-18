@@ -1,4 +1,5 @@
 """Chunker - compiles a TEI document into CitationChunk XML files."""
+
 from __future__ import annotations
 
 import re
@@ -6,7 +7,7 @@ import json
 from pathlib import Path
 
 from lxml import etree
-from perseus_cts.constants import TEI_NS
+from perseus_cts.constants import TEI_NS, XML_LANG
 from perseus_cts.cts_resolver import CTSResolver
 from perseus_cts.models import LenientTEIDocument, CitationChunk
 
@@ -34,8 +35,12 @@ class Chunker:
             fname = self._chunk_filename(chunk)
             index_entries.append({"file": fname, "cts_urn": chunk.cts_urn})
             (output_path / fname).write_bytes(
-                etree.tostring(chunk.to_xml(), encoding="utf-8", xml_declaration=True,
-                               pretty_print=True)
+                etree.tostring(
+                    chunk.to_xml(),
+                    encoding="utf-8",
+                    xml_declaration=True,
+                    pretty_print=True,
+                )
             )
 
         (output_path / "index.json").write_text(
@@ -53,9 +58,7 @@ class Chunker:
             encoding="utf-8",
         )
 
-    _CTS_PATTERN = re.compile(
-        r"urn:cts:[^:]+:[^:]+:(?P<passage>.+)$"
-    )
+    _CTS_PATTERN = re.compile(r"urn:cts:[^:]+:[^:]+:(?P<passage>.+)$")
 
     @staticmethod
     def _chunk_filename(chunk: CitationChunk) -> str:
@@ -70,7 +73,6 @@ class Chunker:
         NS = {"tei": TEI_NS}
         root = self.tei_doc.root
 
-        XML_LANG = "{http://www.w3.org/XML/1998/namespace}lang"
         language = ""
         for tag in ("tei:text", "tei:body"):
             el = root.find(f".//{tag}", NS)
@@ -84,12 +86,17 @@ class Chunker:
 
         monogr = root.find(".//tei:sourceDesc/tei:biblStruct/tei:monogr", NS)
         if monogr is not None:
-            title   = (monogr.findtext("tei:title",  namespaces=NS) or "").strip()
-            author  = (monogr.findtext("tei:author", namespaces=NS) or "").strip()
-            editors = [(ed.text or "").strip() for ed in monogr.findall("tei:editor", NS)]
+            title = (monogr.findtext("tei:title", namespaces=NS) or "").strip()
+            author = (monogr.findtext("tei:author", namespaces=NS) or "").strip()
+            editors = [
+                (ed.text or "").strip() for ed in monogr.findall("tei:editor", NS)
+            ]
             imprint = monogr.find("tei:imprint", NS)
-            pub_place = (imprint.findtext("tei:pubPlace", namespaces=NS) or "").strip() \
-                        if imprint is not None else ""
+            pub_place = (
+                (imprint.findtext("tei:pubPlace", namespaces=NS) or "").strip()
+                if imprint is not None
+                else ""
+            )
             pub_date = ""
             if imprint is not None:
                 for d in imprint.findall("tei:date", NS):
@@ -97,24 +104,34 @@ class Chunker:
                         pub_date = (d.text or "").strip()
                         break
                 if not pub_date:
-                    pub_date = (imprint.findtext("tei:date", namespaces=NS) or "").strip()
+                    pub_date = (
+                        imprint.findtext("tei:date", namespaces=NS) or ""
+                    ).strip()
         else:
-            title   = (root.findtext(".//tei:titleStmt/tei:title",  namespaces=NS) or "").strip()
-            author  = (root.findtext(".//tei:titleStmt/tei:author", namespaces=NS) or "").strip()
-            editors = [(ed.text or "").strip()
-                       for ed in root.findall(".//tei:titleStmt/tei:editor", NS)]
-            pub_stmt  = root.find(".//tei:publicationStmt", NS)
-            pub_place = (pub_stmt.findtext("tei:pubPlace", namespaces=NS) or "").strip() \
-                        if pub_stmt is not None else ""
-            pub_date  = (pub_stmt.findtext("tei:date",     namespaces=NS) or "").strip() \
-                        if pub_stmt is not None else ""
+            title = self.tei_doc.metadata.title
+            author = self.tei_doc.metadata.author
+            editors = [
+                (ed.text or "").strip()
+                for ed in root.findall(".//tei:titleStmt/tei:editor", NS)
+            ]
+            pub_stmt = root.find(".//tei:publicationStmt", NS)
+            pub_place = (
+                (pub_stmt.findtext("tei:pubPlace", namespaces=NS) or "").strip()
+                if pub_stmt is not None
+                else ""
+            )
+            pub_date = (
+                (pub_stmt.findtext("tei:date", namespaces=NS) or "").strip()
+                if pub_stmt is not None
+                else ""
+            )
 
         return {
-            "base_urn":  self.cts_resolver.base_urn,
-            "title":     title,
-            "author":    author,
-            "language":  language,
-            "editors":   editors,
+            "base_urn": self.cts_resolver.base_urn,
+            "title": title,
+            "author": author,
+            "language": language,
+            "editors": editors,
             "pub_place": pub_place,
-            "pub_date":  pub_date,
+            "pub_date": pub_date,
         }

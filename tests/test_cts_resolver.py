@@ -7,9 +7,14 @@ import pytest
 
 from perseus_cts.models import CitationChunk
 from perseus_cts.models.document import LenientTEIDocument
-from perseus_cts.cts_resolver import CitationError, ConfigurationError, CTSResolver as ReferenceParser
+from perseus_cts.cts_resolver import (
+    CitationError,
+    ConfigurationError,
+    CTSResolver as ReferenceParser,
+)
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
+DATA_DIR = Path(__file__).parent / "data"
 
 
 def write_xml(tmp_path: Path, xml: str) -> Path:
@@ -134,7 +139,6 @@ def test_first_level_dot_delim_raises(tmp_path):
 
 
 class TestApologyConstructor:
-
     def test_no_default_single_cs_succeeds(self, tmp_path):
         xml = f"""\
             <?xml version="1.0" encoding="UTF-8"?>
@@ -216,7 +220,6 @@ class TestApologyConstructor:
 
 
 class TestApologyResolve:
-
     def test_resolve_known_section(self, apology_parser):
         elem = apology_parser.resolve(f"{APOLOGY_BASE}:17")
         assert elem.get("n") == "17"
@@ -232,12 +235,9 @@ class TestApologyResolve:
 
 
 class TestApologyGenerate:
-
     def test_generate_known_section(self, apology_doc, apology_parser):
         body = apology_doc.root.find(f".//{{{TEI_NS}}}body")
-        div_17 = next(
-            d for d in body.findall(f"{{{TEI_NS}}}div") if d.get("n") == "17"
-        )
+        div_17 = next(d for d in body.findall(f"{{{TEI_NS}}}div") if d.get("n") == "17")
         assert apology_parser.generate(div_17) == f"{APOLOGY_BASE}:17"
 
     def test_generate_unreachable_element_raises(self, apology_doc, apology_parser):
@@ -247,7 +247,6 @@ class TestApologyGenerate:
 
 
 class TestApologyCitations:
-
     def test_citations_all_levels_count(self, apology_parser):
         assert len(list(apology_parser.citations(depth=-1))) == 3
 
@@ -263,7 +262,6 @@ class TestApologyCitations:
 
 
 class TestThucydidesResolve:
-
     def test_resolve_full_three_level(self, thucydides_parser):
         elem = thucydides_parser.resolve(f"{THUCYDIDES_BASE}:1.1.3")
         assert elem.get("subtype") == "section"
@@ -287,7 +285,6 @@ class TestThucydidesResolve:
 
 
 class TestThucydidesGenerate:
-
     def _get(self, doc, **attrs):
         root = doc.root
         for div in root.iter(f"{{{TEI_NS}}}div"):
@@ -311,7 +308,6 @@ class TestThucydidesGenerate:
 
 
 class TestThucydidesCitations:
-
     def test_citations_depth_zero_books_only(self, thucydides_parser):
         urns = list(thucydides_parser.citations(depth=0))
         assert urns == [
@@ -340,7 +336,6 @@ class TestThucydidesCitations:
 
 
 class TestTOC:
-
     def test_returns_list(self, thucydides_parser):
         result = thucydides_parser.toc()
         assert isinstance(result, list)
@@ -434,7 +429,6 @@ class TestTOC:
 
 
 class TestChunksDivBased:
-
     def test_returns_citation_chunk_objects(self, thucydides_parser):
         result = list(thucydides_parser.chunks())
         assert all(isinstance(c, CitationChunk) for c in result)
@@ -543,7 +537,6 @@ def milestone_parser(tmp_path):
 
 
 class TestChunksMilestoneBased:
-
     def test_returns_citation_chunk_objects(self, milestone_parser):
         result = list(milestone_parser.chunks())
         assert all(isinstance(c, CitationChunk) for c in result)
@@ -573,9 +566,166 @@ class TestChunksMilestoneBased:
 
     def test_each_chunk_contains_correct_content(self, milestone_parser):
         from lxml import etree as _etree
+
         chunks = list(milestone_parser.chunks())
-        divs0 = [e for e in chunks[0].elements if _etree.QName(e.tag).localname == "div"]
+        divs0 = [
+            e for e in chunks[0].elements if _etree.QName(e.tag).localname == "div"
+        ]
         assert len(divs0) == 1
         assert divs0[0][0].text == "card 1 content"
-        divs1 = [e for e in chunks[1].elements if _etree.QName(e.tag).localname == "div"]
+        divs1 = [
+            e for e in chunks[1].elements if _etree.QName(e.tag).localname == "div"
+        ]
         assert divs1[0][0].text == "card 2 content"
+
+
+# ---------------------------------------------------------------------------
+# XPath @use support (range URN / drama pattern)
+# ---------------------------------------------------------------------------
+
+
+def test_flat_line_structure_raises_on_chunks(tmp_path):
+    base = "urn:cts:greekLit:tlg0000.tlg000.test-grc1"
+    xml = textwrap.dedent(f"""\
+        <?xml version="1.0" encoding="UTF-8"?>
+        <TEI xmlns="{TEI_NS}">
+          <teiHeader>
+            <encodingDesc>
+              <refsDecl xml:id="CTS">
+                <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+                  <citeStructure unit="line" delim=":" match=".//tei:l" use="@n"/>
+                </citeStructure>
+              </refsDecl>
+            </encodingDesc>
+          </teiHeader>
+          <text><body xml:base="{base}">
+            <div type="episode"><l n="1">one</l><l n="2">two</l></div>
+          </body></text>
+        </TEI>
+    """)
+    p = tmp_path / "flat_line.xml"
+    p.write_text(xml, encoding="utf-8")
+    parser = ReferenceParser(LenientTEIDocument(p))
+    with pytest.raises(ConfigurationError, match="unit='line'"):
+        list(parser.chunks())
+
+
+DRAMA_BASE = "urn:cts:greekLit:tlg0000.tlg000.test-grc1"
+
+DRAMA_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="scene" delim=":"
+                             match=".//div[@type='textpart']"
+                             use="concat((.//l)[1]/@n, '-', (.//l)[last()]/@n)"
+                             n="chunk"/>
+              <citeStructure unit="line" delim=":" match=".//l" use="@n"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{DRAMA_BASE}">
+          <div type="textpart" subtype="episode" n="1">
+            <l n="1">line one</l>
+            <l n="2">line two</l>
+            <l n="3">line three</l>
+          </div>
+          <div type="textpart" subtype="episode" n="2">
+            <l n="4">line four</l>
+            <l n="5">line five</l>
+          </div>
+        </body>
+      </text>
+    </TEI>"""
+
+
+@pytest.fixture
+def drama_parser(tmp_path):
+    p = tmp_path / "drama.xml"
+    p.write_text(DRAMA_XML, encoding="utf-8")
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestXPathUse:
+    def test_chunk_count_equals_scene_count(self, drama_parser):
+        assert len(list(drama_parser.chunks())) == 2
+
+    def test_chunks_are_scene_unit(self, drama_parser):
+        assert all(c.unit == "scene" for c in drama_parser.chunks())
+
+    def test_chunk_urns_are_line_ranges(self, drama_parser):
+        urns = [c.cts_urn for c in drama_parser.chunks()]
+        assert urns == [f"{DRAMA_BASE}:1-3", f"{DRAMA_BASE}:4-5"]
+
+    def test_prev_next_navigation(self, drama_parser):
+        chunks = list(drama_parser.chunks())
+        assert chunks[0].prev_urn is None
+        assert chunks[0].next_urn == f"{DRAMA_BASE}:4-5"
+        assert chunks[1].prev_urn == f"{DRAMA_BASE}:1-3"
+        assert chunks[1].next_urn is None
+
+    def test_resolve_line_still_works(self, drama_parser):
+        elem = drama_parser.resolve(f"{DRAMA_BASE}:3")
+        assert elem.text == "line three"
+
+    def test_resolve_line_from_second_scene(self, drama_parser):
+        elem = drama_parser.resolve(f"{DRAMA_BASE}:4")
+        assert elem.text == "line four"
+
+    def test_generate_line_element(self, drama_parser, tmp_path):
+        p = tmp_path / "drama.xml"
+        p.write_text(DRAMA_XML, encoding="utf-8")
+        doc = LenientTEIDocument(p)
+        parser = ReferenceParser(doc)
+        line = parser.resolve(f"{DRAMA_BASE}:2")
+        assert parser.generate(line) == f"{DRAMA_BASE}:2"
+
+    def test_citations_include_scene_and_line_levels(self, drama_parser):
+        urns = list(drama_parser.citations())
+        assert f"{DRAMA_BASE}:1-3" in urns
+        assert f"{DRAMA_BASE}:1" in urns
+
+
+# ---------------------------------------------------------------------------
+# Trachiniae fixture — passes once the citeStructure is added to the file
+# ---------------------------------------------------------------------------
+
+TRACHINIAE_PATH = DATA_DIR / "tlg0011.tlg001.perseus-grc2.xml"
+TRACHINIAE_BASE = "urn:cts:greekLit:tlg0011.tlg001.perseus-grc2"
+
+
+@pytest.fixture
+def trachiniae_parser():
+    return ReferenceParser(LenientTEIDocument(TRACHINIAE_PATH))
+
+
+class TestTrachinaeMilestoneChunks:
+    def test_resolver_initializes(self, trachiniae_parser):
+        assert trachiniae_parser is not None
+
+    def test_chunks_are_scene_unit(self, trachiniae_parser):
+        chunks = list(trachiniae_parser.chunks())
+        assert all(c.unit == "scene" for c in chunks)
+
+    def test_chunk_urns_are_line_ranges(self, trachiniae_parser):
+        urns = [c.cts_urn for c in trachiniae_parser.chunks()]
+        assert all("-" in u.split(":")[-1] for u in urns)
+
+    def test_first_chunk_starts_at_line_1(self, trachiniae_parser):
+        chunks = list(trachiniae_parser.chunks())
+        first_passage = chunks[0].cts_urn.split(":")[-1]
+        assert first_passage.startswith("1-")
+
+    def test_resolve_first_line(self, trachiniae_parser):
+        elem = trachiniae_parser.resolve(f"{TRACHINIAE_BASE}:1")
+        assert elem.get("n") == "1"
+
+    def test_chunks_are_fewer_than_lines(self, trachiniae_parser):
+        chunks = list(trachiniae_parser.chunks())
+        lines = list(trachiniae_parser.citations(depth=0))
+        assert len(chunks) < len(lines)

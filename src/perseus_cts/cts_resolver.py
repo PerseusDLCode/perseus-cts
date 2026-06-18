@@ -133,6 +133,21 @@ class CTSResolver:
                     f"must be ':' (CTS passage separator)"
                 )
 
+    def _eval_use(self, cs: etree._Element, cand: etree._Element) -> str:
+        """Evaluate a citeStructure @use expression against a candidate element.
+
+        Supports both the @attr shorthand and arbitrary XPath expressions."""
+        use_attr = cs.get("use", "@n")
+        if use_attr.startswith("@"):
+            return cand.get(use_attr[1:], "")
+        results = cand.xpath(
+            _prefix_match_expr(use_attr, self._doc_prefix),
+            namespaces=self._ns_map,
+        )
+        if not isinstance(results, list):
+            return str(results)
+        return str(results[0]) if results else ""
+
     def _match(self, expr: str, context: etree._Element) -> list:
         """Evaluate a citeStructure match expression against context."""
         return context.xpath(
@@ -236,8 +251,7 @@ class CTSResolver:
                 raise ConfigurationError(
                     f"<citeStructure unit={cs.get('unit')!r}> is missing required @delim"
                 )
-            use_attr = cs.get("use", "@n")
-            val = elem.get(use_attr[1:], "") if use_attr.startswith("@") else ""
+            val = self._eval_use(cs, elem)
             parts.append(delim + val)
         return self._base_urn + "".join(parts)
 
@@ -286,7 +300,7 @@ class CTSResolver:
             children = cs.xpath("tei:citeStructure", namespaces=NS)
             candidates: list[etree._Element] = self._match(match_expr, context)
             for cand in candidates:
-                val = cand.get(use_attr[1:], "") if use_attr.startswith("@") else ""
+                val = self._eval_use(cs, cand)
                 yield _CSNode(
                     cs=cs,
                     element=cand,
@@ -322,9 +336,8 @@ class CTSResolver:
 
     def toc(self) -> list[dict]:
         """Return the full citation hierarchy as a list of nested TOC entries."""
-        return self._toc_level(
-            "", self._root_cs.xpath("tei:citeStructure", namespaces=NS), self._body, 0
-        )
+        cs_list = self._root_cs.xpath("tei:citeStructure", namespaces=NS)
+        return self._toc_level("", cs_list, self._body, 0)
 
     def _toc_level(
         self,
@@ -333,21 +346,29 @@ class CTSResolver:
         context: etree._Element,
         depth: int,
     ) -> list[dict]:
+        if not cs_list:
+            return []
+        cs = cs_list[0]
+        cs_children = cs.xpath("tei:citeStructure", namespaces=NS)
+        # When cs has no children of its own, treat remaining siblings as the next level
+        sub_cs = cs_children if cs_children else cs_list[1:]
+        match_expr = cs.get("match", "")
+        delim = cs.get("delim", ":")
+        unit = cs.get("unit", "")
+        candidates = self._match(match_expr, context)
         entries: list[dict] = []
-        for idx, node in enumerate(self._walk_cs(suffix, cs_list, context), 1):
-            label_val = node.val or str(idx)
-            subpassages = (
-                self._toc_level(node.suffix, node.children, node.element, depth + 1)
-                if node.children
-                else []
-            )
+        for idx, cand in enumerate(candidates, 1):
+            val = self._eval_use(cs, cand)
+            new_suffix = suffix + delim + val
+            subpassages = self._toc_level(new_suffix, sub_cs, cand, depth + 1) if sub_cs else []
+            label_val = val or str(idx)
             entries.append(
                 {
                     "depth": depth,
                     "index": idx,
-                    "label": f"{node.unit.capitalize()} {label_val}",
-                    "subtype": node.unit,
-                    "urn": self._base_urn + node.suffix,
+                    "label": f"{unit.capitalize()} {label_val}",
+                    "subtype": unit,
+                    "urn": self._base_urn + new_suffix,
                     "subpassages": subpassages,
                 }
             )
@@ -374,7 +395,13 @@ class CTSResolver:
         found = self._find_cs_with_attr(self._root_cs, "n", "chunk")
         if found is not None:
             return found
-        return self._penultimate_cs()
+        cs = self._penultimate_cs()
+        if cs.get("unit") == "line":
+            raise ConfigurationError(
+                "Default chunk level resolved to unit='line'; add n=\"chunk\" "
+                "to the intended chunk-level citeStructure (e.g. scene or card)"
+            )
+        return cs
 
     def _find_cs_with_attr(
         self,
