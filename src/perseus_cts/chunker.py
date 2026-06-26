@@ -84,10 +84,15 @@ class Chunker:
             if lang_el is not None:
                 language = lang_el.get("ident", "")
 
+        title = self.tei_doc.metadata.title
+        author = self.tei_doc.metadata.author
+
         monogr = root.find(".//tei:sourceDesc/tei:biblStruct/tei:monogr", NS)
         if monogr is not None:
-            title = (monogr.findtext("tei:title", namespaces=NS) or "").strip()
-            author = (monogr.findtext("tei:author", namespaces=NS) or "").strip()
+            if not title:
+                title = (monogr.findtext("tei:title", namespaces=NS) or "").strip()
+            if not author:
+                author = (monogr.findtext("tei:author", namespaces=NS) or "").strip()
             editors = [
                 (ed.text or "").strip() for ed in monogr.findall("tei:editor", NS)
             ]
@@ -108,8 +113,6 @@ class Chunker:
                         imprint.findtext("tei:date", namespaces=NS) or ""
                     ).strip()
         else:
-            title = self.tei_doc.metadata.title
-            author = self.tei_doc.metadata.author
             editors = [
                 (ed.text or "").strip()
                 for ed in root.findall(".//tei:titleStmt/tei:editor", NS)
