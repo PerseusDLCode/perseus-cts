@@ -7,7 +7,6 @@ lookup of textgroup, work, and version metadata by CTS URN.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,9 +66,7 @@ class CTSCatalog:
     """
 
     def __init__(self, roots: Path | str | list[Path | str]) -> None:
-        self._roots = [
-            Path(r) for r in (roots if isinstance(roots, list) else [roots])
-        ]
+        self._roots = [Path(r) for r in (roots if isinstance(roots, list) else [roots])]
         for root in self._roots:
             if not root.exists():
                 raise FileNotFoundError(f"CTS catalog root not found: {root}")
@@ -248,6 +245,7 @@ class CTSCatalog:
         work = self.work_for(urn)
         if work is None:
             return []
+
         return [
             v
             for v in self._versions.values()

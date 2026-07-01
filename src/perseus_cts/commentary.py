@@ -44,7 +44,9 @@ def ranges_overlap(a: str, b: str) -> bool:
         return False
     a_start, a_end = _parse_range(a)
     b_start, b_end = _parse_range(b)
-    return _parse_ref(a_start) <= _parse_ref(b_end) and _parse_ref(b_start) <= _parse_ref(a_end)
+    return _parse_ref(a_start) <= _parse_ref(b_end) and _parse_ref(
+        b_start
+    ) <= _parse_ref(a_end)
 
 
 def _urns_overlap(a: str, b: str) -> bool:
@@ -153,7 +155,9 @@ def _seg_xml(seg: etree._Element | None) -> str | None:
     return etree.tostring(seg, encoding="unicode", with_tail=False)
 
 
-def links_for_passage(catalog: CTSCatalog, work_urn: str, citation: str) -> CommentaryLookup:
+def links_for_passage(
+    catalog: CTSCatalog, work_urn: str, citation: str
+) -> CommentaryLookup:
     """Return commentary links relevant to `citation` within `work_urn`.
 
     For each commentary associated with the work (via <ti:about>), the
