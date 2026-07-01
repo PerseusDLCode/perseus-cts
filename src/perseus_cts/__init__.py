@@ -21,6 +21,7 @@ from perseus_cts.cts_resolver import (
     elements_between,
 )
 from perseus_cts.chunker import Chunker
+from perseus_cts.commentary import CommentaryLink, CommentaryLookup, links_for_passage
 
 __all__ = [
     "NS",
@@ -45,4 +46,7 @@ __all__ = [
     "copy_before",
     "elements_between",
     "Chunker",
+    "CommentaryLink",
+    "CommentaryLookup",
+    "links_for_passage",
 ]

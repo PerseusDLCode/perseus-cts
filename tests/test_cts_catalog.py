@@ -44,6 +44,22 @@ WORK_CTS = textwrap.dedent("""\
     </ti:work>
 """)
 
+COMMENTARY_CTS = textwrap.dedent("""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <ti:work xmlns:ti="http://chs.harvard.edu/xmlns/cts"
+             groupUrn="urn:cts:greekLit:viaf001"
+             urn="urn:cts:greekLit:viaf001.viaf001"
+             xml:lang="eng">
+      <ti:title xml:lang="eng">Commentary on the Iliad</ti:title>
+      <ti:commentary workUrn="urn:cts:greekLit:viaf001.viaf001"
+                     urn="urn:cts:greekLit:viaf001.viaf001.perseus-eng1" xml:lang="eng">
+        <ti:label xml:lang="eng">Commentary on the Iliad</ti:label>
+        <ti:description xml:lang="eng">A commentary.</ti:description>
+        <ti:about urn="urn:cts:greekLit:tlg0012.tlg001"/>
+      </ti:commentary>
+    </ti:work>
+""")
+
 WORK_ODYSSEY_CTS = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
     <ti:work xmlns:ti="http://chs.harvard.edu/xmlns/cts"
@@ -376,6 +392,37 @@ class TestEditionTranslationLinking:
 
     def test_editions_of_unknown_urn(self, catalog):
         assert catalog.editions_of("urn:cts:unknown") == []
+
+    def test_commentaries_of_by_work_urn(self, tmp_path):
+        write_cts(tmp_path, "tlg0012", "__cts__.xml", content=GROUP_CTS)
+        write_cts(tmp_path, "tlg0012", "tlg001", "__cts__.xml", content=WORK_CTS)
+        write_cts(tmp_path, "viaf001", "viaf001", "__cts__.xml", content=COMMENTARY_CTS)
+        catalog = CTSCatalog(tmp_path)
+        commentaries = catalog.commentaries_of("urn:cts:greekLit:tlg0012.tlg001")
+        assert len(commentaries) == 1
+        assert commentaries[0].urn == "urn:cts:greekLit:viaf001.viaf001.perseus-eng1"
+        assert commentaries[0].about == "urn:cts:greekLit:tlg0012.tlg001"
+
+    def test_commentaries_of_by_version_urn(self, tmp_path):
+        write_cts(tmp_path, "tlg0012", "__cts__.xml", content=GROUP_CTS)
+        write_cts(tmp_path, "tlg0012", "tlg001", "__cts__.xml", content=WORK_CTS)
+        write_cts(tmp_path, "viaf001", "viaf001", "__cts__.xml", content=COMMENTARY_CTS)
+        catalog = CTSCatalog(tmp_path)
+        commentaries = catalog.commentaries_of(
+            "urn:cts:greekLit:tlg0012.tlg001.perseus-grc2"
+        )
+        assert len(commentaries) == 1
+
+    def test_commentaries_of_no_match(self, tmp_path):
+        write_cts(tmp_path, "tlg0012", "__cts__.xml", content=GROUP_CTS)
+        write_cts(tmp_path, "tlg0012", "tlg002", "__cts__.xml", content=WORK_ODYSSEY_CTS)
+        write_cts(tmp_path, "viaf001", "viaf001", "__cts__.xml", content=COMMENTARY_CTS)
+        catalog = CTSCatalog(tmp_path)
+        assert catalog.commentaries_of("urn:cts:greekLit:tlg0012.tlg002") == []
+
+    def test_commentaries_of_unknown_urn(self, tmp_path):
+        catalog = CTSCatalog(tmp_path)
+        assert catalog.commentaries_of("urn:cts:unknown") == []
 
     def test_no_mutual_interference(self, tmp_path):
         write_cts(tmp_path, "tlg0012", "__cts__.xml", content=GROUP_CTS)

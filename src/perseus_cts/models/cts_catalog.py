@@ -29,6 +29,7 @@ class CTSVersion:
     description: str
     version_type: str
     memberof: str | None = None
+    about: str | None = None
     source_path: Path | None = None
 
 
@@ -179,6 +180,9 @@ class CTSCatalog:
             memberof_el.get("collection", "") if memberof_el is not None else None
         )
 
+        about_el = el.find("ti:about", _CTS_MAP)
+        about = about_el.get("urn") if about_el is not None else None
+
         return CTSVersion(
             urn=urn,
             work_urn=work_urn,
@@ -187,6 +191,7 @@ class CTSCatalog:
             description=description,
             version_type=version_type,
             memberof=memberof,
+            about=about,
             source_path=source_path,
         )
 
@@ -232,3 +237,21 @@ class CTSCatalog:
         if work is None:
             return []
         return [v for v in work.versions if v.version_type == "edition"]
+
+    def commentaries_of(self, urn: str) -> list[CTSVersion]:
+        """Return commentary versions whose <ti:about> covers the given work/version urn.
+
+        A commentary's `about` urn may name a whole textgroup, a whole work, or
+        a citation subrange of a work, so versions are matched by URN-prefix
+        overlap in either direction rather than exact equality.
+        """
+        work = self.work_for(urn)
+        if work is None:
+            return []
+        return [
+            v
+            for v in self._versions.values()
+            if v.version_type == "commentary"
+            and v.about is not None
+            and (v.about.startswith(work.urn) or work.urn.startswith(v.about))
+        ]
