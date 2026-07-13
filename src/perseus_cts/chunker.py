@@ -17,9 +17,13 @@ class Chunker:
 
     Writes one XML file per chunk plus index.json and metadata.json."""
 
-    def __init__(self, tei_doc: LenientTEIDocument) -> None:
+    def __init__(
+        self,
+        tei_doc: LenientTEIDocument,
+        refsDecl_id: str = "CTS",
+    ) -> None:
         self.tei_doc: LenientTEIDocument = tei_doc
-        self.cts_resolver = CTSResolver(tei_doc)
+        self.cts_resolver = CTSResolver(tei_doc, refsDecl_id=refsDecl_id)
         self._citation_chunks: list[CitationChunk] | None = None
 
     @property
@@ -51,6 +55,8 @@ class Chunker:
         metadata = {
             "version": "1",
             "document": self._build_document_metadata(),
+            "refsDecl_id": self.cts_resolver.refsDecl_id,
+            "chunk_unit": self.citation_chunks[0].unit if self.citation_chunks else "",
             "toc": self.cts_resolver.toc(),
         }
         (output_path / "metadata.json").write_text(

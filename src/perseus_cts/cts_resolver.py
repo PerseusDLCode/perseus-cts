@@ -84,12 +84,29 @@ class CitationError(Exception):
     """Raised when a URN is syntactically invalid or resolves to nothing."""
 
 
+def available_refsDecl_ids(tei_doc: LenientTEIDocument) -> list[str]:
+    """Return the xml:id of every citeStructure-bearing refsDecl in a document.
+
+    A document may declare more than one valid citation scheme for the same
+    work (e.g. scene/line vs. card-based chunking for a tragedy); each is
+    addressed via CTSResolver(tei_doc, refsDecl_id=...)."""
+    return cast(
+        list[str],
+        tei_doc.root.xpath(
+            "/tei:TEI/tei:teiHeader/tei:encodingDesc"
+            "/tei:refsDecl[tei:citeStructure][@xml:id]/@xml:id",
+            namespaces=NS,
+        ),
+    )
+
+
 class CTSResolver:
     def __init__(
         self,
         tei_doc: LenientTEIDocument,
         refsDecl_id: str = "CTS",
     ) -> None:
+        self._refsDecl_id = refsDecl_id
         root = tei_doc.root
 
         try:
@@ -298,6 +315,10 @@ class CTSResolver:
     @property
     def base_urn(self) -> str:
         return self._base_urn
+
+    @property
+    def refsDecl_id(self) -> str:
+        return self._refsDecl_id
 
     def citation_records(self, depth: int = -1) -> Iterator[CitationRecord]:
         """Yield CitationRecord objects at every citation level."""

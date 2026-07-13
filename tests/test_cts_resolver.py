@@ -11,6 +11,7 @@ from perseus_cts.cts_resolver import (
     CitationError,
     ConfigurationError,
     CTSResolver as ReferenceParser,
+    available_refsDecl_ids,
 )
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -729,3 +730,46 @@ class TestTrachinaeMilestoneChunks:
         chunks = list(trachiniae_parser.chunks())
         lines = list(trachiniae_parser.citations(depth=0))
         assert len(chunks) < len(lines)
+
+
+# ---------------------------------------------------------------------------
+# Trachiniae — alternate card-based citeStructure (CTS-card refsDecl)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def trachiniae_card_parser():
+    return ReferenceParser(LenientTEIDocument(TRACHINIAE_PATH), refsDecl_id="CTS-card")
+
+
+class TestTrachiniaeCardChunks:
+    def test_resolver_initializes(self, trachiniae_card_parser):
+        assert trachiniae_card_parser is not None
+
+    def test_chunks_are_card_unit(self, trachiniae_card_parser):
+        chunks = list(trachiniae_card_parser.chunks())
+        assert all(c.unit == "card" for c in chunks)
+
+    def test_chunk_count_equals_card_milestone_count(self, trachiniae_card_parser):
+        chunks = list(trachiniae_card_parser.chunks())
+        assert len(chunks) == 65
+
+    def test_first_chunk_urn_is_card_one(self, trachiniae_card_parser):
+        chunks = list(trachiniae_card_parser.chunks())
+        assert chunks[0].cts_urn == f"{TRACHINIAE_BASE}:1"
+
+    def test_card_chunks_are_more_numerous_than_scene_chunks(
+        self, trachiniae_card_parser, trachiniae_parser
+    ):
+        card_chunks = list(trachiniae_card_parser.chunks())
+        scene_chunks = list(trachiniae_parser.chunks())
+        assert len(card_chunks) > len(scene_chunks)
+
+
+class TestAvailableRefsDeclIds:
+    def test_trachiniae_declares_both_schemes(self):
+        doc = LenientTEIDocument(TRACHINIAE_PATH)
+        assert available_refsDecl_ids(doc) == ["CTS", "CTS-card"]
+
+    def test_apology_declares_single_scheme(self, apology_doc):
+        assert available_refsDecl_ids(apology_doc) == ["CTS"]

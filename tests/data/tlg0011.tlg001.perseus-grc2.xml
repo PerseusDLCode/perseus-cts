@@ -75,6 +75,10 @@
                     <citeStructure unit="line" delim=":" match=".//l" use="@n" />
                 </citeStructure>
             </refsDecl>
+            <refsDecl n="CTS" xml:id="CTS-card">
+                <citeStructure match="//milestone[@unit='card']"
+                    unit="card" delim=":" use="@n" n="chunk" />
+            </refsDecl>
         </encodingDesc>
         <profileDesc>
             <textClass>

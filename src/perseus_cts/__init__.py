@@ -17,6 +17,7 @@ from perseus_cts.cts_resolver import (
     CitationError,
     ConfigurationError,
     CTSResolver,
+    available_refsDecl_ids,
     copy_before,
     elements_between,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "CitationError",
     "ConfigurationError",
     "CTSResolver",
+    "available_refsDecl_ids",
     "copy_before",
     "elements_between",
     "Chunker",
