@@ -184,6 +184,20 @@ class CTSResolver:
             ),
         )
 
+    def _root_level_cs_list(self) -> list[etree._Element]:
+        """Return the citeStructure levels to walk from the document root.
+
+        Normally these are root_cs's children (root_cs itself being a mere
+        wrapper matching the document body, e.g. match="/TEI/text/body").
+        A document may instead declare a single flat citeStructure with no
+        wrapper (e.g. milestone-based chunking) — in that case root_cs IS
+        the one level, so it is returned directly."""
+        children = cast(
+            list[etree._Element],
+            self._root_cs.xpath("tei:citeStructure", namespaces=NS),
+        )
+        return children if children else [self._root_cs]
+
     def resolve(self, urn: str) -> etree._Element:
         """Return the element identified by the full CTS URN."""
 
@@ -202,14 +216,7 @@ class CTSResolver:
         if not passage:
             raise CitationError(f"URN has no passage component: {urn!r}")
 
-        return self._resolve_passage(
-            passage,
-            cast(
-                list[etree._Element],
-                self._root_cs.xpath("tei:citeStructure", namespaces=NS),
-            ),
-            self._body,
-        )
+        return self._resolve_passage(passage, self._root_level_cs_list(), self._body)
 
     def _resolve_passage(
         self,
@@ -273,7 +280,7 @@ class CTSResolver:
 
     def generate(self, element: etree._Element) -> str:
         """Return the full CTS URN for a citable element."""
-        path = self._find_path_to(element, self._root_cs, self._body)
+        path = self._find_path_to(element, self._root_level_cs_list(), self._body)
         if path is None:
             raise CitationError(
                 f"Element <{etree.QName(element.tag).localname}> "
@@ -293,20 +300,24 @@ class CTSResolver:
     def _find_path_to(
         self,
         target: etree._Element,
-        parent_cs: etree._Element,
+        cs_list: list[etree._Element],
         context: etree._Element,
     ) -> Optional[list[tuple[etree._Element, etree._Element]]]:
-        for cs in cast(
-            list[etree._Element], parent_cs.xpath("tei:citeStructure", namespaces=NS)
-        ):
+        for cs in cs_list:
             match_expr = cs.get("match", "")
             candidates: list[etree._Element] = self._match(match_expr, context)
 
             if any(cand is target for cand in candidates):
                 return [(cs, target)]
 
+            children: list[etree._Element] = cast(
+                list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
+            )
+            if not children:
+                continue
+
             for cand in candidates:
-                result = self._find_path_to(target, cs, cand)
+                result = self._find_path_to(target, children, cand)
                 if result is not None:
                     return [(cs, cand)] + result
 
@@ -323,14 +334,7 @@ class CTSResolver:
     def citation_records(self, depth: int = -1) -> Iterator[CitationRecord]:
         """Yield CitationRecord objects at every citation level."""
         yield from self._records_recursive(
-            "",
-            cast(
-                list[etree._Element],
-                self._root_cs.xpath("tei:citeStructure", namespaces=NS),
-            ),
-            self._body,
-            0,
-            depth,
+            "", self._root_level_cs_list(), self._body, 0, depth
         )
 
     def _walk_cs(
@@ -385,11 +389,7 @@ class CTSResolver:
 
     def toc(self) -> list[dict]:
         """Return the full citation hierarchy as a list of nested TOC entries."""
-        cs_list: list[etree._Element] = cast(
-            list[etree._Element],
-            self._root_cs.xpath("tei:citeStructure", namespaces=NS),
-        )
-        return self._toc_level("", cs_list, self._body, 0)
+        return self._toc_level("", self._root_level_cs_list(), self._body, 0)
 
     def _toc_level(
         self,
@@ -435,14 +435,7 @@ class CTSResolver:
         yield from (
             r.urn
             for r in self._records_recursive(
-                "",
-                cast(
-                    list[etree._Element],
-                    self._root_cs.xpath("tei:citeStructure", namespaces=NS),
-                ),
-                self._body,
-                0,
-                depth,
+                "", self._root_level_cs_list(), self._body, 0, depth
             )
         )
 

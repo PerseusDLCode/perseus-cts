@@ -765,6 +765,26 @@ class TestTrachiniaeCardChunks:
         scene_chunks = list(trachiniae_parser.chunks())
         assert len(card_chunks) > len(scene_chunks)
 
+    def test_toc_is_flat_list_of_card_entries(self, trachiniae_card_parser):
+        toc = trachiniae_card_parser.toc()
+        assert len(toc) == 65
+        assert all(entry["subtype"] == "card" for entry in toc)
+        assert all(entry["subpassages"] == [] for entry in toc)
+        assert toc[0]["urn"] == f"{TRACHINIAE_BASE}:1"
+
+    def test_citations_yields_every_card_urn(self, trachiniae_card_parser):
+        urns = list(trachiniae_card_parser.citations())
+        assert len(urns) == 65
+        assert urns[0] == f"{TRACHINIAE_BASE}:1"
+
+    def test_resolve_a_card(self, trachiniae_card_parser):
+        elem = trachiniae_card_parser.resolve(f"{TRACHINIAE_BASE}:49")
+        assert elem.get("n") == "49"
+
+    def test_generate_round_trips_resolve(self, trachiniae_card_parser):
+        elem = trachiniae_card_parser.resolve(f"{TRACHINIAE_BASE}:49")
+        assert trachiniae_card_parser.generate(elem) == f"{TRACHINIAE_BASE}:49"
+
 
 class TestAvailableRefsDeclIds:
     def test_trachiniae_declares_both_schemes(self):
