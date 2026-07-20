@@ -7,6 +7,8 @@ import pytest
 
 from perseus_cts.models.cts_catalog import CTSCatalog, CTSGroup, CTSWork, CTSVersion
 
+from conftest import write_cts
+
 
 GROUP_CTS = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
@@ -80,13 +82,6 @@ WORK_ODYSSEY_CTS = textwrap.dedent("""\
       </ti:translation>
     </ti:work>
 """)
-
-
-def write_cts(directory: Path, *parts: str, content: str) -> Path:
-    p = directory.joinpath(*parts)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(textwrap.dedent(content), encoding="utf-8")
-    return p
 
 
 # ---------------------------------------------------------------------------

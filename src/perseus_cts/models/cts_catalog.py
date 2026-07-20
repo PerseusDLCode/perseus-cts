@@ -32,6 +32,9 @@ class CTSVersion:
     source_path: Path | None = None
 
 
+_DEFAULT_TITLE_LANG = "eng"
+
+
 @dataclass
 class CTSWork:
     """Metadata for a single work, including its versions."""
@@ -43,6 +46,17 @@ class CTSWork:
     genre: str | None = None
     genre_confidence: str | None = None
     source_path: Path | None = None
+
+    def title_for(self, language: str, default_lang: str = _DEFAULT_TITLE_LANG) -> str:
+        """Return the title matching `language`, falling back to `default_lang`.
+
+        Never falls back to whatever title happens to be first in the dict
+        (e.g. the Greek or Latin title), since that would be wrong for
+        readers of an unrelated language.
+        """
+        if language and language in self.titles:
+            return self.titles[language]
+        return self.titles.get(default_lang, "")
 
 
 @dataclass

@@ -9,7 +9,7 @@ from pathlib import Path
 from lxml import etree
 from perseus_cts.constants import TEI_NS, XML_LANG
 from perseus_cts.cts_resolver import CTSResolver
-from perseus_cts.models import LenientTEIDocument, CitationChunk
+from perseus_cts.models import CTSCatalog, LenientTEIDocument, CitationChunk
 
 
 class Chunker:
@@ -21,9 +21,11 @@ class Chunker:
         self,
         tei_doc: LenientTEIDocument,
         refsDecl_id: str = "CTS",
+        catalog: CTSCatalog | None = None,
     ) -> None:
         self.tei_doc: LenientTEIDocument = tei_doc
         self.cts_resolver = CTSResolver(tei_doc, refsDecl_id=refsDecl_id)
+        self.catalog = catalog
         self._citation_chunks: list[CitationChunk] | None = None
 
     @property
@@ -75,6 +77,15 @@ class Chunker:
             return f"{safe}.xml"
         return f"{m['passage']}.xml"
 
+    def _catalog_title(self, language: str) -> str:
+        """Look up the work's title from __cts__.xml, matching the document's xml:lang."""
+        if self.catalog is None:
+            return ""
+        work = self.catalog.work_for(self.cts_resolver.base_urn)
+        if work is None:
+            return ""
+        return work.title_for(language)
+
     def _build_document_metadata(self) -> dict:
         NS = {"tei": TEI_NS}
         root = self.tei_doc.root
@@ -90,7 +101,9 @@ class Chunker:
             if lang_el is not None:
                 language = lang_el.get("ident", "")
 
-        title = self.tei_doc.metadata.title
+        title = self._catalog_title(language)
+        if not title:
+            title = self.tei_doc.metadata.title
         author = self.tei_doc.metadata.author
 
         monogr = root.find(".//tei:sourceDesc/tei:biblStruct/tei:monogr", NS)
