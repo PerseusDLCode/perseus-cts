@@ -4,8 +4,9 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
-from perseus_cts.commentary import links_for_passage, ranges_overlap
+from perseus_cts.commentary import _line_ref, links_for_passage, ranges_overlap
 from perseus_cts.models.cts_catalog import CTSCatalog
 
 
@@ -130,6 +131,38 @@ class TestRangesOverlap:
     def test_empty_ref_never_overlaps(self):
         assert not ranges_overlap("", "497")
         assert not ranges_overlap("497", "")
+
+
+def _seg_in_div(div_xml: str) -> etree._Element:
+    root = etree.fromstring(
+        f'<TEI xmlns="{"http://www.tei-c.org/ns/1.0"}">{div_xml}</TEI>'
+    )
+    return root.find(".//{http://www.tei-c.org/ns/1.0}seg")
+
+
+class TestLineRef:
+    def test_recognized_div_type_yields_its_n(self):
+        seg = _seg_in_div(
+            '<div type="commline" n="497"><seg type="comment">x</seg></div>'
+        )
+        assert _line_ref(seg) == "497"
+
+    def test_unrecognized_div_type_yields_none(self):
+        seg = _seg_in_div(
+            '<div type="entry" n="497"><seg type="comment">x</seg></div>'
+        )
+        assert _line_ref(seg) is None
+
+    def test_nearest_recognized_ancestor_wins(self):
+        seg = _seg_in_div(
+            '<div type="entry" n="outer">'
+            '<div type="commline" n="497"><seg type="comment">x</seg></div>'
+            "</div>"
+        )
+        assert _line_ref(seg) == "497"
+
+    def test_none_seg_yields_none(self):
+        assert _line_ref(None) is None
 
 
 class TestLinksForPassage:

@@ -23,6 +23,13 @@ _DIV_TAG = f"{{{TEI_NS}}}div"
 
 _SEGMENT = re.compile(r"^(\d*)(.*)$")
 
+# div/@type values known to wrap one commentary entry's lemma/comment <seg>
+# pair, keyed by the entry's line/passage reference (@n). Commentary sources
+# are heterogeneous TEI conversions we don't control the markup of, so this
+# is a recognized-value allow-list to extend as new conventions turn up,
+# rather than a convention we can mandate upstream.
+_LINE_REF_DIV_TYPES = frozenset({"commline"})
+
 
 def _parse_segment(segment: str) -> tuple[int, str]:
     match = _SEGMENT.match(segment)
@@ -54,19 +61,20 @@ def _urns_overlap(a: str, b: str) -> bool:
     return a.startswith(b) or b.startswith(a)
 
 
-def _commline_ref(seg: etree._Element | None) -> str | None:
-    """Return the enclosing <div type="commline" n="..."> value for `seg`.
+def _line_ref(seg: etree._Element | None) -> str | None:
+    """Return the enclosing per-entry div's @n value for `seg`, if any.
 
     linkGrp targets only carry a coarse section range (e.g. "1-150" for an
     entire commentary section), too coarse to point a reader at a specific
-    base-text line. Commentaries structure individual entries inside
-    <div type="commline" n="LINE">, so the div's @n is the actual per-entry
-    line/passage reference.
+    base-text line. Commentaries structure individual entries inside a div
+    whose @type is one of _LINE_REF_DIV_TYPES (e.g. <div type="commline"
+    n="LINE">), so that div's @n is the actual per-entry line/passage
+    reference.
     """
     if seg is None:
         return None
     for ancestor in seg.iterancestors(_DIV_TAG):
-        if ancestor.get("type") == "commline":
+        if ancestor.get("type") in _LINE_REF_DIV_TYPES:
             return ancestor.get("n")
     return None
 
@@ -231,7 +239,7 @@ def links_for_passage(
                         commentary_label=commentary.label or commentary.urn,
                         target=target,
                         anchor_id=anchor_id,
-                        line_ref=_commline_ref(comment_seg),
+                        line_ref=_line_ref(comment_seg),
                         lemma=_seg_xml(seg_index.lemma_for(anchor_id)),
                         comment=_seg_xml(comment_seg),
                     )
