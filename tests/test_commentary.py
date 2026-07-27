@@ -233,6 +233,32 @@ class TestLinksForPassage:
         assert link.lemma is not None and "θανάτων" in link.lemma
         assert link.comment is not None and "the genitive after" in link.comment
 
+    def test_line_ref_comes_from_enclosing_commline_div(self, base_catalog_dir):
+        write(base_catalog_dir, "viaf001", "viaf001", "__cts__.xml",
+              content=COMMENTARY_CTS_TEMPLATE.format(n=1))
+        write(base_catalog_dir, "viaf001", "viaf001",
+              "viaf001.viaf1.perseus-eng1.xml", content=COMMENTARY_TEI_WITH_LINKGRP)
+        catalog = CTSCatalog(base_catalog_dir)
+
+        result = links_for_passage(catalog, "urn:cts:greekLit:tlg0011.tlg004", "463-512")
+        link = result.links[0]
+
+        assert link.anchor_id == "Thanaton_497"
+        assert link.line_ref == "497"
+
+    def test_line_ref_is_none_when_comment_is_missing(self, base_catalog_dir):
+        write(base_catalog_dir, "viaf001", "viaf001", "__cts__.xml",
+              content=COMMENTARY_CTS_TEMPLATE.format(n=1))
+        write(base_catalog_dir, "viaf001", "viaf001",
+              "viaf001.viaf1.perseus-eng1.xml", content=COMMENTARY_TEI_WITH_LINKGRP)
+        catalog = CTSCatalog(base_catalog_dir)
+
+        result = links_for_passage(catalog, "urn:cts:greekLit:tlg0011.tlg004", "151-215")
+        link = result.links[0]
+
+        assert link.anchor_id == "Dios_151"
+        assert link.line_ref is None
+
     def test_missing_lemma_or_comment_is_none(self, base_catalog_dir):
         write(base_catalog_dir, "viaf001", "viaf001", "__cts__.xml",
               content=COMMENTARY_CTS_TEMPLATE.format(n=1))

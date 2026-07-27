@@ -19,6 +19,7 @@ from perseus_cts.constants import NS, TEI_NS, XML_ID, XML_PARSER
 from perseus_cts.models.cts_catalog import CTSCatalog, CTSVersion
 
 _SEG_TAG = f"{{{TEI_NS}}}seg"
+_DIV_TAG = f"{{{TEI_NS}}}div"
 
 _SEGMENT = re.compile(r"^(\d*)(.*)$")
 
@@ -53,6 +54,23 @@ def _urns_overlap(a: str, b: str) -> bool:
     return a.startswith(b) or b.startswith(a)
 
 
+def _commline_ref(seg: etree._Element | None) -> str | None:
+    """Return the enclosing <div type="commline" n="..."> value for `seg`.
+
+    linkGrp targets only carry a coarse section range (e.g. "1-150" for an
+    entire commentary section), too coarse to point a reader at a specific
+    base-text line. Commentaries structure individual entries inside
+    <div type="commline" n="LINE">, so the div's @n is the actual per-entry
+    line/passage reference.
+    """
+    if seg is None:
+        return None
+    for ancestor in seg.iterancestors(_DIV_TAG):
+        if ancestor.get("type") == "commline":
+            return ancestor.get("n")
+    return None
+
+
 def _parse_link_target(target: str) -> tuple[str | None, str, str]:
     """Split a <link target="..."> value into (work_urn, citation, anchor_id).
 
@@ -82,12 +100,19 @@ class CommentaryLink:
     "#{anchor_id}". Either may be None if the commentary doesn't encode that
     pairing for this anchor. Callers render these with their own TEI-to-HTML
     pipeline (e.g. MVP's TEIParser).
+
+    `line_ref` is the @n of the enclosing <div type="commline">, i.e. the
+    specific base-text line/passage this entry comments on. It is None when
+    the comment <seg> isn't found or isn't nested in a commline div. It is
+    finer-grained than `target`'s citation, which only carries the coarse
+    section range the whole linkGrp entry was matched against.
     """
 
     commentary_urn: str
     commentary_label: str
     target: str
     anchor_id: str
+    line_ref: str | None = None
     lemma: str | None = None
     comment: str | None = None
 
@@ -199,14 +224,16 @@ def links_for_passage(
                     continue
                 if not ranges_overlap(target_citation, citation):
                     continue
+                comment_seg = seg_index.comment_for(anchor_id)
                 result.links.append(
                     CommentaryLink(
                         commentary_urn=commentary.urn,
                         commentary_label=commentary.label or commentary.urn,
                         target=target,
                         anchor_id=anchor_id,
+                        line_ref=_commline_ref(comment_seg),
                         lemma=_seg_xml(seg_index.lemma_for(anchor_id)),
-                        comment=_seg_xml(seg_index.comment_for(anchor_id)),
+                        comment=_seg_xml(comment_seg),
                     )
                 )
 
