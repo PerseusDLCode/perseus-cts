@@ -113,7 +113,8 @@ class Chunker:
             if not author:
                 author = (monogr.findtext("tei:author", namespaces=NS) or "").strip()
             editors = [
-                (ed.text or "").strip() for ed in monogr.findall("tei:editor", NS)
+                {"name": (ed.text or "").strip(), "role": ed.get("role", "")}
+                for ed in monogr.findall("tei:editor", NS)
             ]
             imprint = monogr.find("tei:imprint", NS)
             pub_place = (
@@ -133,7 +134,7 @@ class Chunker:
                     ).strip()
         else:
             editors = [
-                (ed.text or "").strip()
+                {"name": (ed.text or "").strip(), "role": ed.get("role", "")}
                 for ed in root.findall(".//tei:titleStmt/tei:editor", NS)
             ]
             pub_stmt = root.find(".//tei:publicationStmt", NS)
