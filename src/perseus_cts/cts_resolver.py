@@ -388,8 +388,17 @@ class CTSResolver:
                 )
 
     def toc(self) -> list[dict]:
-        """Return the full citation hierarchy as a list of nested TOC entries."""
-        return self._toc_level("", self._root_level_cs_list(), self._body, 0)
+        """Return the citation hierarchy as nested TOC entries, stopping at the chunk level.
+
+        Leaves of the returned tree are the citeStructure level used to
+        generate actual chunks (see _find_chunk_cs: the level marked
+        n="chunk", or the penultimate level as a fallback), not the deepest
+        citeStructure level in the document. Without this, a TOC built down
+        to the deepest level (e.g. individual lines) would be too granular
+        for navigation, since chunks span multiple leaves at that depth.
+        """
+        chunk_cs = self._find_chunk_cs()
+        return self._toc_level("", self._root_level_cs_list(), self._body, 0, chunk_cs)
 
     def _toc_level(
         self,
@@ -397,6 +406,7 @@ class CTSResolver:
         cs_list: list[etree._Element],
         context: etree._Element,
         depth: int,
+        chunk_cs: etree._Element,
     ) -> list[dict]:
         if not cs_list:
             return []
@@ -406,6 +416,7 @@ class CTSResolver:
         )
         # When cs has no children of its own, treat remaining siblings as the next level
         sub_cs = cs_children if cs_children else cs_list[1:]
+        is_chunk_level = cs is chunk_cs
         match_expr = cs.get("match", "")
         delim = cs.get("delim", ":")
         unit = cs.get("unit", "")
@@ -415,7 +426,9 @@ class CTSResolver:
             val = self._eval_use(cs, cand)
             new_suffix = suffix + delim + val
             subpassages = (
-                self._toc_level(new_suffix, sub_cs, cand, depth + 1) if sub_cs else []
+                self._toc_level(new_suffix, sub_cs, cand, depth + 1, chunk_cs)
+                if sub_cs and not is_chunk_level
+                else []
             )
             label_val = val or str(idx)
             entries.append(
