@@ -100,13 +100,59 @@ def available_refsDecl_ids(tei_doc: LenientTEIDocument) -> list[str]:
     )
 
 
+def auto_chunk_units(
+    tei_doc: LenientTEIDocument, refsDecl_id: str = "CTS"
+) -> list[str]:
+    """Return unit names for automatically-derived, shallower chunking schemes.
+
+    A hierarchy nested three or more citeStructure levels deep (e.g.
+    book/chapter/section) always resolves an explicit or default chunk level
+    at its deepest level, forcing every reader/navigation link to that finest
+    granularity. This mirrors the same hierarchy one level shallower (e.g.
+    book/chapter alone), so a corpus doesn't need to hand-duplicate its own
+    citeStructure tree in a second refsDecl just to expose an intermediate
+    navigation depth (contrast with e.g. tragedy's scene/card refsDecl pair,
+    which encode two genuinely different citation schemes and so are not
+    handled here). Returns [] for a two-level-or-shallower hierarchy, and
+    also when ``refsDecl_id`` doesn't resolve (callers needn't guard).
+    """
+    try:
+        resolver = CTSResolver(tei_doc, refsDecl_id=refsDecl_id)
+    except ConfigurationError:
+        return []
+    chain = resolver._deepest_chain()
+    if len(chain) < 3:
+        return []
+    default_chunk_cs = resolver._find_chunk_cs()
+    # The two deepest levels are the ones worth exposing as alternate
+    # granularities (e.g. book.chapter vs book.chapter.section) — whichever
+    # of the two isn't already the configured default. A document may
+    # explicitly chunk at either the shallower or the deeper of the pair
+    # (compare Thucydides, whose default is the deepest "section" level,
+    # against Herodotus, whose default is the shallower "chapter" level),
+    # so this can't just assume which direction the auto scheme goes.
+    if default_chunk_cs is chain[-1]:
+        other = chain[-2]
+    elif default_chunk_cs is chain[-2]:
+        other = chain[-1]
+    else:
+        # Default chunk level isn't one of the two deepest — an unusual
+        # configuration this heuristic isn't equipped to extend safely.
+        return []
+    return [other.get("unit", "")]
+
+
 class CTSResolver:
     def __init__(
         self,
         tei_doc: LenientTEIDocument,
         refsDecl_id: str = "CTS",
+        chunk_unit: str | None = None,
     ) -> None:
-        self._refsDecl_id = refsDecl_id
+        self._refsDecl_id = (
+            f"{refsDecl_id}-{chunk_unit}" if chunk_unit else refsDecl_id
+        )
+        self._chunk_unit_override = chunk_unit
         root = tei_doc.root
 
         try:
@@ -387,18 +433,33 @@ class CTSResolver:
                     max_depth,
                 )
 
-    def toc(self) -> list[dict]:
-        """Return the citation hierarchy as nested TOC entries, stopping at the chunk level.
+    def toc(self, unit_scheme_map: dict[str, str] | None = None) -> list[dict]:
+        """Return the citation hierarchy as nested TOC entries.
 
-        Leaves of the returned tree are the citeStructure level used to
-        generate actual chunks (see _find_chunk_cs: the level marked
-        n="chunk", or the penultimate level as a fallback), not the deepest
-        citeStructure level in the document. Without this, a TOC built down
-        to the deepest level (e.g. individual lines) would be too granular
-        for navigation, since chunks span multiple leaves at that depth.
+        Without ``unit_scheme_map``, this stops at the chunk level (the
+        citeStructure level marked n="chunk", or the penultimate level as a
+        fallback — see _find_chunk_cs) rather than the deepest level in the
+        document, since a TOC built all the way down to e.g. individual
+        lines would be too granular for navigation.
+
+        ``unit_scheme_map`` (unit name -> scheme slug, "" for the default/
+        no-scheme reading view) instead recurses all the way to the
+        document's true leaf, and stamps each entry with a "scheme" key
+        (None when that entry's unit isn't in the map). This lets a caller
+        with more than one *hierarchically nested* chunking scheme for the
+        same underlying tree (e.g. book/chapter and book/chapter/section —
+        see perseus_cts.cts_resolver.auto_chunk_units) render one combined
+        TOC where every paginated level is independently linkable, not just
+        the deepest one. Schemes that aren't a simple depth-truncation of
+        the same tree (e.g. tragedy's scene vs. card, matched against
+        entirely different elements) should not be included in the map;
+        their units simply never appear while walking this tree, so passing
+        an unrelated map is harmless but pointless.
         """
         chunk_cs = self._find_chunk_cs()
-        return self._toc_level("", self._root_level_cs_list(), self._body, 0, chunk_cs)
+        return self._toc_level(
+            "", self._root_level_cs_list(), self._body, 0, chunk_cs, unit_scheme_map
+        )
 
     def _toc_level(
         self,
@@ -407,6 +468,7 @@ class CTSResolver:
         context: etree._Element,
         depth: int,
         chunk_cs: etree._Element,
+        unit_scheme_map: dict[str, str] | None,
     ) -> list[dict]:
         if not cs_list:
             return []
@@ -417,6 +479,10 @@ class CTSResolver:
         # When cs has no children of its own, treat remaining siblings as the next level
         sub_cs = cs_children if cs_children else cs_list[1:]
         is_chunk_level = cs is chunk_cs
+        # Only stop recursion at the chunk level in the single-scheme
+        # (no map) case — with a map, every level down to the true leaf is
+        # wanted so each paginated level can carry its own link.
+        stop_recursion = unit_scheme_map is None and is_chunk_level
         match_expr = cs.get("match", "")
         delim = cs.get("delim", ":")
         unit = cs.get("unit", "")
@@ -426,21 +492,24 @@ class CTSResolver:
             val = self._eval_use(cs, cand)
             new_suffix = suffix + delim + val
             subpassages = (
-                self._toc_level(new_suffix, sub_cs, cand, depth + 1, chunk_cs)
-                if sub_cs and not is_chunk_level
+                self._toc_level(
+                    new_suffix, sub_cs, cand, depth + 1, chunk_cs, unit_scheme_map
+                )
+                if sub_cs and not stop_recursion
                 else []
             )
             label_val = val or str(idx)
-            entries.append(
-                {
-                    "depth": depth,
-                    "index": idx,
-                    "label": f"{unit.capitalize()} {label_val}",
-                    "subtype": unit,
-                    "urn": self._base_urn + new_suffix,
-                    "subpassages": subpassages,
-                }
-            )
+            entry = {
+                "depth": depth,
+                "index": idx,
+                "label": f"{unit.capitalize()} {label_val}",
+                "subtype": unit,
+                "urn": self._base_urn + new_suffix,
+                "subpassages": subpassages,
+            }
+            if unit_scheme_map is not None:
+                entry["scheme"] = unit_scheme_map.get(unit)
+            entries.append(entry)
         return entries
 
     def citations(self, depth: int = -1) -> Iterator[str]:
@@ -462,6 +531,15 @@ class CTSResolver:
             yield from self._div_chunks(target_cs)
 
     def _find_chunk_cs(self) -> etree._Element:
+        if self._chunk_unit_override is not None:
+            found = self._find_cs_with_attr(
+                self._root_cs, "unit", self._chunk_unit_override
+            )
+            if found is None:
+                raise ConfigurationError(
+                    f"No citeStructure with unit={self._chunk_unit_override!r} found"
+                )
+            return found
         found = self._find_cs_with_attr(self._root_cs, "n", "chunk")
         if found is not None:
             return found
@@ -489,7 +567,9 @@ class CTSResolver:
                 return found
         return None
 
-    def _penultimate_cs(self) -> etree._Element:
+    def _deepest_chain(self) -> list[etree._Element]:
+        """Return the citeStructure levels from the root wrapper down to the
+        deepest (first-child) leaf, in order."""
         path: list[etree._Element] = []
         cs = self._root_cs
         while True:
@@ -500,6 +580,10 @@ class CTSResolver:
                 break
             cs = children[0]
             path.append(cs)
+        return path
+
+    def _penultimate_cs(self) -> etree._Element:
+        path = self._deepest_chain()
         if not path:
             return self._root_cs
         if len(path) == 1:

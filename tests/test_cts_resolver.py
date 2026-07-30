@@ -11,6 +11,7 @@ from perseus_cts.cts_resolver import (
     CitationError,
     ConfigurationError,
     CTSResolver as ReferenceParser,
+    auto_chunk_units,
     available_refsDecl_ids,
 )
 
@@ -432,6 +433,41 @@ class TestTOC:
         assert result[1]["urn"] == base + ":"
 
 
+class TestTOCUnitSchemeMap:
+    """With a unit_scheme_map, toc() recurses to the true leaf and stamps
+    each entry's target scheme, instead of stopping at the resolver's own
+    chunk level (see auto_chunk_units and Chunker.compile)."""
+
+    def test_recurses_past_own_chunk_level_into_sections(self, thucydides_parser):
+        # thucydides_parser's own default chunk level is "chapter" (no
+        # n="chunk" -> penultimate fallback); passing a map should still
+        # surface "section" subpassages beneath each chapter.
+        result = thucydides_parser.toc({"chapter": "", "section": "section"})
+        chapter = result[0]["subpassages"][0]
+        assert [s["subtype"] for s in chapter["subpassages"]] == ["section", "section", "section"]
+
+    def test_entries_carry_scheme_from_map(self, thucydides_parser):
+        result = thucydides_parser.toc({"chapter": "", "section": "section"})
+        book, chapter = result[0], result[0]["subpassages"][0]
+        section = chapter["subpassages"][0]
+        assert book["scheme"] is None
+        assert chapter["scheme"] == ""
+        assert section["scheme"] == "section"
+
+    def test_unmapped_unit_yields_none_scheme(self, thucydides_parser):
+        result = thucydides_parser.toc({"chapter": ""})
+        chapter = result[0]["subpassages"][0]
+        section = chapter["subpassages"][0]
+        assert chapter["scheme"] == ""
+        assert section["scheme"] is None
+
+    def test_no_map_keeps_old_behavior_and_omits_scheme_key(self, thucydides_parser):
+        result = thucydides_parser.toc()
+        chapter = result[0]["subpassages"][0]
+        assert chapter["subpassages"] == []
+        assert "scheme" not in chapter
+
+
 class TestChunksDivBased:
     def test_returns_citation_chunk_objects(self, thucydides_parser):
         result = list(thucydides_parser.chunks())
@@ -505,6 +541,86 @@ class TestChunksDivBased:
         result = list(parser.chunks())
         assert len(result) == 2
         assert all(c.unit == "section" for c in result)
+
+
+HERODOTUS_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="book" delim=":" match="tei:div[@subtype='book']" use="@n">
+                <citeStructure unit="chapter" delim="." match="tei:div[@subtype='chapter']" use="@n" n="chunk">
+                  <citeStructure unit="section" delim="." match="tei:div[@subtype='section']" use="@n"/>
+                </citeStructure>
+              </citeStructure>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{THUCYDIDES_BASE}">
+          <div type="textpart" subtype="book" n="1">
+            <div type="textpart" subtype="chapter" n="1">
+              <div type="textpart" subtype="section" n="1"><p>a</p></div>
+              <div type="textpart" subtype="section" n="2"><p>b</p></div>
+            </div>
+          </div>
+        </body>
+      </text>
+    </TEI>
+"""
+
+
+class TestAutoChunkUnits:
+    """auto_chunk_units derives a depth-based routing scheme for the level
+    adjacent to the configured default, without requiring a second refsDecl
+    (see canonical-greekLit's hand-written CTS-chapter/CTS-section pairs for
+    Thucydides/Herodotus, which this is meant to make unnecessary)."""
+
+    def test_two_level_hierarchy_yields_nothing(self, apology_doc):
+        assert auto_chunk_units(apology_doc) == []
+
+    def test_default_at_penultimate_level_yields_deepest_unit(self, thucydides_doc):
+        # thucydides_parser has no n="chunk", so the default chunk level is
+        # the penultimate ("chapter") — the deeper "section" level is the
+        # one worth exposing as an auto scheme.
+        assert auto_chunk_units(thucydides_doc) == ["section"]
+
+    def test_default_at_deepest_level_yields_penultimate_unit(self, tmp_path):
+        xml = THUCYDIDES_XML.replace(
+            'match="tei:div[@subtype=\'section\']" use="@n"/>',
+            'match="tei:div[@subtype=\'section\']" use="@n" n="chunk"/>',
+        )
+        p = write_xml(tmp_path, xml)
+        doc = LenientTEIDocument(p)
+        assert auto_chunk_units(doc) == ["chapter"]
+
+    def test_default_at_shallower_explicit_level_yields_deepest_unit(self, tmp_path):
+        p = write_xml(tmp_path, HERODOTUS_XML)
+        doc = LenientTEIDocument(p)
+        assert auto_chunk_units(doc) == ["section"]
+
+    def test_single_level_hierarchy_yields_nothing(self, tmp_path):
+        p = write_xml(tmp_path, MILESTONE_XML)
+        doc = LenientTEIDocument(p)
+        assert auto_chunk_units(doc) == []
+
+    def test_chunk_unit_override_chunks_at_that_level(self, thucydides_doc):
+        resolver = ReferenceParser(thucydides_doc, chunk_unit="section")
+        result = list(resolver.chunks())
+        assert all(c.unit == "section" for c in result)
+        assert len(result) == 6
+
+    def test_chunk_unit_override_sets_synthetic_refsDecl_id(self, thucydides_doc):
+        resolver = ReferenceParser(thucydides_doc, chunk_unit="section")
+        assert resolver.refsDecl_id == "CTS-section"
+
+    def test_chunk_unit_override_unknown_unit_raises(self, thucydides_doc):
+        resolver = ReferenceParser(thucydides_doc, chunk_unit="paragraph")
+        with pytest.raises(ConfigurationError):
+            list(resolver.chunks())
 
 
 MILESTONE_BASE = "urn:cts:myexample:author.work.edition"

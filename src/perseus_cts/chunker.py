@@ -22,9 +22,12 @@ class Chunker:
         tei_doc: LenientTEIDocument,
         refsDecl_id: str = "CTS",
         catalog: CTSCatalog | None = None,
+        chunk_unit: str | None = None,
     ) -> None:
         self.tei_doc: LenientTEIDocument = tei_doc
-        self.cts_resolver = CTSResolver(tei_doc, refsDecl_id=refsDecl_id)
+        self.cts_resolver = CTSResolver(
+            tei_doc, refsDecl_id=refsDecl_id, chunk_unit=chunk_unit
+        )
         self.catalog = catalog
         self._citation_chunks: list[CitationChunk] | None = None
 
@@ -34,7 +37,12 @@ class Chunker:
             self._citation_chunks = list(self.cts_resolver.chunks())
         return self._citation_chunks
 
-    def compile(self, output_path: Path, **kwargs):
+    def compile(
+        self,
+        output_path: Path,
+        unit_scheme_map: dict[str, str] | None = None,
+        **kwargs,
+    ):
         output_path.mkdir(parents=True, exist_ok=True)
         index_entries: list[dict] = []
         for chunk in self.citation_chunks:
@@ -59,7 +67,7 @@ class Chunker:
             "document": self._build_document_metadata(),
             "refsDecl_id": self.cts_resolver.refsDecl_id,
             "chunk_unit": self.citation_chunks[0].unit if self.citation_chunks else "",
-            "toc": self.cts_resolver.toc(),
+            "toc": self.cts_resolver.toc(unit_scheme_map),
         }
         (output_path / "metadata.json").write_text(
             json.dumps(metadata, indent=2, ensure_ascii=False),

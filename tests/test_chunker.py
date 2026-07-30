@@ -11,6 +11,7 @@ from perseus_cts.models.cts_catalog import CTSCatalog
 from perseus_cts.models.document import LenientTEIDocument
 
 from conftest import write_cts
+from test_cts_resolver import THUCYDIDES_XML, write_xml
 
 DATA_DIR = Path(__file__).parent / "data"
 TRACHINIAE_PATH = DATA_DIR / "tlg0011.tlg001.perseus-grc2.xml"
@@ -70,6 +71,32 @@ class TestChunkerRefsDeclSelection:
 
         index = json.loads((tmp_path / "index.json").read_text())
         assert len(index["chunks"]) == 65
+
+
+class TestChunkerAutoDepthScheme:
+    """chunk_unit lets a caller compile an auto-derived, depth-based scheme
+    (see perseus_cts.cts_resolver.auto_chunk_units) without a second refsDecl."""
+
+    def test_chunk_unit_compiles_at_that_level(self, tmp_path):
+        doc = LenientTEIDocument(write_xml(tmp_path, THUCYDIDES_XML))
+        chunker = Chunker(doc, chunk_unit="section")
+        output = tmp_path / "out"
+        chunker.compile(output)
+        metadata = json.loads((output / "metadata.json").read_text())
+        assert metadata["refsDecl_id"] == "CTS-section"
+        assert metadata["chunk_unit"] == "section"
+        index = json.loads((output / "index.json").read_text())
+        assert len(index["chunks"]) == 6
+
+    def test_unit_scheme_map_threads_through_to_toc(self, tmp_path):
+        doc = LenientTEIDocument(write_xml(tmp_path, THUCYDIDES_XML))
+        chunker = Chunker(doc, chunk_unit="section")
+        output = tmp_path / "out"
+        chunker.compile(output, unit_scheme_map={"chapter": "", "section": "section"})
+        metadata = json.loads((output / "metadata.json").read_text())
+        chapter = metadata["toc"][0]["subpassages"][0]
+        assert chapter["scheme"] == ""
+        assert chapter["subpassages"][0]["scheme"] == "section"
 
 
 class TestChunkerCatalogTitle:
