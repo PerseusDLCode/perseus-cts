@@ -233,13 +233,24 @@ def links_for_passage(
                 if not ranges_overlap(target_citation, citation):
                     continue
                 comment_seg = seg_index.comment_for(anchor_id)
+                line_ref = _line_ref(comment_seg)
+                # `target_citation` is only the coarse section the whole
+                # linkGrp entry belongs to (e.g. "141-496" shared by hundreds
+                # of per-word entries spanning that entire section) — it can
+                # overlap `citation` even though this particular entry's own
+                # line, given by the finer per-entry `line_ref`, falls
+                # outside the passage actually being displayed. Re-check
+                # against that finer reference when we have one, so e.g.
+                # requesting "205-496" doesn't pull in entries for line 141.
+                if line_ref is not None and not ranges_overlap(line_ref, citation):
+                    continue
                 result.links.append(
                     CommentaryLink(
                         commentary_urn=commentary.urn,
                         commentary_label=commentary.label or commentary.urn,
                         target=target,
                         anchor_id=anchor_id,
-                        line_ref=_line_ref(comment_seg),
+                        line_ref=line_ref,
                         lemma=_seg_xml(seg_index.lemma_for(anchor_id)),
                         comment=_seg_xml(comment_seg),
                     )
