@@ -142,6 +142,38 @@ def auto_chunk_units(
     return [other.get("unit", "")]
 
 
+def section_scheme_unit(
+    tei_doc: LenientTEIDocument, refsDecl_id: str = "CTS"
+) -> str | None:
+    """Return "section" if this refsDecl has an independently-linkable
+    "section" citeStructure level, else None.
+
+    Every "section" division is meant to be individually readable, even in a
+    hierarchy only two levels deep (e.g. tragedy's chapter/section, which
+    auto_chunk_units' three-level threshold skips as too shallow to need an
+    auto-derived alternate scheme). This always exposes "section" as its own
+    chunk scheme when the document declares one and it isn't already the
+    configured default chunk level (which would make a second identical
+    scheme pointless). Returns None when ``refsDecl_id`` doesn't resolve or
+    the document has no "section" citeStructure level (callers needn't
+    guard).
+    """
+    try:
+        resolver = CTSResolver(tei_doc, refsDecl_id=refsDecl_id)
+    except ConfigurationError:
+        return None
+    section_cs = resolver._find_cs_with_attr(resolver._root_cs, "unit", "section")
+    if section_cs is None:
+        return None
+    try:
+        default_chunk_cs = resolver._find_chunk_cs()
+    except ConfigurationError:
+        default_chunk_cs = None
+    if section_cs is default_chunk_cs:
+        return None
+    return "section"
+
+
 class CTSResolver:
     def __init__(
         self,

@@ -21,6 +21,7 @@ from perseus_cts.cts_resolver import (
     available_refsDecl_ids,
     copy_before,
     elements_between,
+    section_scheme_unit,
 )
 from perseus_cts.chunker import Chunker
 from perseus_cts.commentary import CommentaryLink, CommentaryLookup, links_for_passage
@@ -49,6 +50,7 @@ __all__ = [
     "available_refsDecl_ids",
     "copy_before",
     "elements_between",
+    "section_scheme_unit",
     "Chunker",
     "CommentaryLink",
     "CommentaryLookup",
