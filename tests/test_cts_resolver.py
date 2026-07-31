@@ -13,6 +13,7 @@ from perseus_cts.cts_resolver import (
     CTSResolver as ReferenceParser,
     auto_chunk_units,
     available_refsDecl_ids,
+    section_scheme_unit,
 )
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -571,6 +572,72 @@ HERODOTUS_XML = f"""\
       </text>
     </TEI>
 """
+
+
+# Two-level chapter/section hierarchy with no third "book" level, like
+# Aeneas Tacticus's Poliorcetica (tlg0058.tlg001) — too shallow for
+# auto_chunk_units' three-level threshold, but "section" should still get
+# its own scheme via section_scheme_unit.
+POLIORCETICA_BASE = "urn:cts:greekLit:tlg0058.tlg001.perseus-grc2"
+
+POLIORCETICA_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="chapter" delim=":" match="tei:div[@subtype='chapter']" use="@n">
+                <citeStructure unit="section" delim="." match="tei:div[@subtype='section']" use="@n"/>
+              </citeStructure>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{POLIORCETICA_BASE}">
+          <div type="textpart" subtype="chapter" n="1">
+            <div type="textpart" subtype="section" n="1"><p>a</p></div>
+            <div type="textpart" subtype="section" n="2"><p>b</p></div>
+          </div>
+        </body>
+      </text>
+    </TEI>
+"""
+
+
+class TestSectionSchemeUnit:
+    """section_scheme_unit always exposes a "section" citeStructure level as
+    its own chunk scheme, even below auto_chunk_units' three-level depth
+    threshold, unless it's already the configured default chunk level."""
+
+    def test_two_level_chapter_section_yields_section(self, tmp_path):
+        p = write_xml(tmp_path, POLIORCETICA_XML)
+        doc = LenientTEIDocument(p)
+        assert section_scheme_unit(doc) == "section"
+
+    def test_section_already_default_chunk_yields_nothing(self, apology_doc):
+        # apology_doc's only citeStructure level *is* "section", so it's
+        # already the default chunk level — a second identical scheme would
+        # be pointless.
+        assert section_scheme_unit(apology_doc) is None
+
+    def test_section_already_deepest_default_yields_nothing(self, tmp_path):
+        xml = THUCYDIDES_XML.replace(
+            'match="tei:div[@subtype=\'section\']" use="@n"/>',
+            'match="tei:div[@subtype=\'section\']" use="@n" n="chunk"/>',
+        )
+        p = write_xml(tmp_path, xml)
+        doc = LenientTEIDocument(p)
+        assert section_scheme_unit(doc) is None
+
+    def test_three_level_hierarchy_yields_section(self, thucydides_doc):
+        assert section_scheme_unit(thucydides_doc) == "section"
+
+    def test_no_section_level_yields_nothing(self, tmp_path):
+        p = write_xml(tmp_path, MILESTONE_XML)
+        doc = LenientTEIDocument(p)
+        assert section_scheme_unit(doc) is None
 
 
 class TestAutoChunkUnits:
