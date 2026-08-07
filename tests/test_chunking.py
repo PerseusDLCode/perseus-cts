@@ -96,3 +96,26 @@ class TestElementsBetween:
         m2 = etree.SubElement(body, "milestone", n="2")
         result = elements_between(body, m1, m2)
         assert result == []
+
+    def test_comment_between_milestones_is_skipped(self):
+        body = etree.Element("body")
+        m1 = etree.SubElement(body, "milestone", n="1")
+        body.append(etree.Comment("<div type='app_crit'/>"))
+        p = etree.SubElement(body, "p")
+        p.text = "content"
+        m2 = etree.SubElement(body, "milestone", n="2")
+        result = elements_between(body, m1, m2)
+        assert len(result) == 1
+        assert result[0].tag == "p"
+        assert result[0].text == "content"
+
+    def test_pi_between_milestones_is_skipped(self):
+        body = etree.Element("body")
+        m1 = etree.SubElement(body, "milestone", n="1")
+        body.append(etree.ProcessingInstruction("target", "data"))
+        p = etree.SubElement(body, "p")
+        p.text = "content"
+        m2 = etree.SubElement(body, "milestone", n="2")
+        result = elements_between(body, m1, m2)
+        assert len(result) == 1
+        assert result[0].tag == "p"

@@ -73,7 +73,15 @@ def elements_between(
     start = pos[id(start_ms)]
     end = pos[id(end_ms)] if end_ms is not None else len(all_elements)
 
-    hits = [e for e in all_elements if start < pos[id(e)] < end]
+    # Comments and PIs are non-content asides that can legally sit directly
+    # in body (e.g. an editor's commented-out <div>); their .tag is a Cython
+    # function rather than a string, which crashes etree.Element() in
+    # copy_before if one is picked as a top-level hit.
+    hits = [
+        e
+        for e in all_elements
+        if start < pos[id(e)] < end and isinstance(e.tag, str)
+    ]
     hit_ids = {id(e) for e in hits}
     top = [e for e in hits if not any(id(a) in hit_ids for a in e.iterancestors())]
 
