@@ -16,6 +16,13 @@ from perseus_cts.models.document import LenientTEIDocument
 _QUOTE = re.compile(r'(["\'][^"\']*["\'])')
 _BARE_ELEMENT = re.compile(r"(?<![:\w@])([A-Za-z_][A-Za-z0-9_\-]*)(?![\w\-:(])")
 
+# TEI's own model.milestoneLike class: empty markers that punctuate a
+# document rather than contain it. A citeStructure matching any of these
+# chunks by collecting everything *between* consecutive markers (see
+# _milestone_chunks), rather than treating each match as a self-contained
+# chunk (see _div_chunks).
+_MILESTONE_LIKE_ELEMENTS = {"milestone", "pb", "cb", "lb", "gb"}
+
 
 def _prefix_match_expr(expr: str, prefix: str) -> str:
     """Prefix bare element names in a citeStructure @match expression."""
@@ -23,6 +30,15 @@ def _prefix_match_expr(expr: str, prefix: str) -> str:
     for i in range(0, len(parts), 2):
         parts[i] = _BARE_ELEMENT.sub(rf"{prefix}:\1", parts[i])
     return "".join(parts)
+
+
+def _match_local_name(match_expr: str) -> str:
+    """Return the local element name of a citeStructure @match expression's
+    final path step, stripping any namespace prefix and predicate."""
+    last_step = match_expr.strip().split("/")[-1]
+    if ":" in last_step:
+        last_step = last_step.split(":", 1)[1]
+    return last_step.split("[", 1)[0].strip()
 
 
 def copy_before(
@@ -557,7 +573,7 @@ class CTSResolver:
         """Yield CitationChunk objects at the designated chunking level."""
         target_cs = self._find_chunk_cs()
         match_expr = target_cs.get("match", "")
-        if "milestone" in match_expr:
+        if _match_local_name(match_expr) in _MILESTONE_LIKE_ELEMENTS:
             yield from self._milestone_chunks(target_cs)
         else:
             yield from self._div_chunks(target_cs)

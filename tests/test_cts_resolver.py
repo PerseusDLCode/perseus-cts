@@ -766,6 +766,81 @@ class TestChunksMilestoneBased:
         assert divs1[0][0].text == "card 2 content"
 
 
+PB_BASE = "urn:cts:greekLit:tlg0084.tlg001.1st1K-grc1"
+
+PB_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="./pb" unit="page" delim=":" use="@n" n="chunk"/>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{PB_BASE}">
+          <pb n="103"/>
+          <l n="1">page 103 content</l>
+          <pb n="104"/>
+          <l n="2">page 104 content</l>
+          <pb n="105"/>
+          <l n="3">page 105 content</l>
+        </body>
+      </text>
+    </TEI>"""
+
+
+@pytest.fixture
+def pb_parser(tmp_path):
+    p = tmp_path / "pb.xml"
+    p.write_text(PB_XML, encoding="utf-8")
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestChunksPageBreakBased:
+    def test_returns_citation_chunk_objects(self, pb_parser):
+        result = list(pb_parser.chunks())
+        assert all(isinstance(c, CitationChunk) for c in result)
+
+    def test_chunk_count_equals_pb_count(self, pb_parser):
+        result = list(pb_parser.chunks())
+        assert len(result) == 3
+
+    def test_chunks_are_page_unit(self, pb_parser):
+        result = list(pb_parser.chunks())
+        assert all(c.unit == "page" for c in result)
+
+    def test_chunk_urns(self, pb_parser):
+        urns = [c.cts_urn for c in pb_parser.chunks()]
+        assert urns == [
+            f"{PB_BASE}:103",
+            f"{PB_BASE}:104",
+            f"{PB_BASE}:105",
+        ]
+
+    def test_prev_next_navigation(self, pb_parser):
+        chunks = list(pb_parser.chunks())
+        assert chunks[0].prev_urn is None
+        assert chunks[0].next_urn == f"{PB_BASE}:104"
+        assert chunks[2].prev_urn == f"{PB_BASE}:104"
+        assert chunks[2].next_urn is None
+
+    def test_each_chunk_contains_the_lines_between_page_breaks(self, pb_parser):
+        from lxml import etree as _etree
+
+        chunks = list(pb_parser.chunks())
+        lines0 = [
+            e for e in chunks[0].elements if _etree.QName(e.tag).localname == "l"
+        ]
+        assert len(lines0) == 1
+        assert lines0[0].text == "page 103 content"
+        lines1 = [
+            e for e in chunks[1].elements if _etree.QName(e.tag).localname == "l"
+        ]
+        assert lines1[0].text == "page 104 content"
+
+
 # ---------------------------------------------------------------------------
 # XPath @use support (range URN / drama pattern)
 # ---------------------------------------------------------------------------
