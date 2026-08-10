@@ -8,10 +8,9 @@ from typing import Optional, cast
 
 from lxml import etree
 
-from perseus_cts.models import CitationChunk, CitationRecord
 from perseus_cts.constants import NS, TEI_NS
+from perseus_cts.models import CitationChunk, CitationRecord
 from perseus_cts.models.document import LenientTEIDocument
-
 
 _QUOTE = re.compile(r'(["\'][^"\']*["\'])')
 _BARE_ELEMENT = re.compile(r"(?<![:\w@])([A-Za-z_][A-Za-z0-9_\-]*)(?![\w\-:(])")
@@ -78,9 +77,7 @@ def elements_between(
     # function rather than a string, which crashes etree.Element() in
     # copy_before if one is picked as a top-level hit.
     hits = [
-        e
-        for e in all_elements
-        if start < pos[id(e)] < end and isinstance(e.tag, str)
+        e for e in all_elements if start < pos[id(e)] < end and isinstance(e.tag, str)
     ]
     hit_ids = {id(e) for e in hits}
     top = [e for e in hits if not any(id(a) in hit_ids for a in e.iterancestors())]
@@ -205,9 +202,7 @@ class CTSResolver:
         refsDecl_id: str = "CTS",
         chunk_unit: str | None = None,
     ) -> None:
-        self._refsDecl_id = (
-            f"{refsDecl_id}-{chunk_unit}" if chunk_unit else refsDecl_id
-        )
+        self._refsDecl_id = f"{refsDecl_id}-{chunk_unit}" if chunk_unit else refsDecl_id
         self._chunk_unit_override = chunk_unit
         root = tei_doc.root
 
@@ -665,22 +660,73 @@ class CTSResolver:
         unit = target_cs.get("unit", "")
         delim = target_cs.get("delim", " ")
 
-        milestones: list[etree._Element] = self._match(match_expr, self._body)
+        def _val(ms: etree._Element) -> str:
+            return ms.get(use_attr[1:], "") if use_attr.startswith("@") else ""
 
-        def _urn(ms: etree._Element) -> str:
-            val = ms.get(use_attr[1:], "") if use_attr.startswith("@") else ""
-            return self._base_urn + delim + val
+        # Like every other citeStructure level, a milestone-like level's
+        # @match is relative to its *parent* level's matched element (e.g.
+        # book.card: "milestone[@unit='card']" is meant to run against each
+        # matched book div, not against body). _milestone_contexts finds
+        # those parent-matched elements, prefixed with the URN suffix
+        # accumulated down to them, so nested milestone schemes resolve
+        # against the right context and get a complete URN.
+        milestones: list[tuple[etree._Element, str]] = [
+            (ms, prefix + delim + _val(ms))
+            for prefix, context in self._milestone_contexts(target_cs)
+            for ms in self._match(match_expr, context)
+        ]
 
-        for i, ms in enumerate(milestones):
-            ms_next = milestones[i + 1] if i + 1 < len(milestones) else None
+        def _urn(suffix: str) -> str:
+            return self._base_urn + suffix
+
+        for i, (ms, suffix) in enumerate(milestones):
+            ms_next = milestones[i + 1][0] if i + 1 < len(milestones) else None
             yield CitationChunk(
                 base_urn=self._base_urn,
-                cts_urn=_urn(ms),
+                cts_urn=_urn(suffix),
                 unit=unit,
                 elements=elements_between(self._body, ms, ms_next),
-                prev_urn=_urn(milestones[i - 1]) if i > 0 else None,
-                next_urn=_urn(ms_next) if ms_next is not None else None,
+                prev_urn=_urn(milestones[i - 1][1]) if i > 0 else None,
+                next_urn=_urn(milestones[i + 1][1]) if i + 1 < len(milestones) else None,
             )
+
+    def _milestone_contexts(
+        self, target_cs: etree._Element
+    ) -> list[tuple[str, etree._Element]]:
+        """Return (urn_suffix, context_element) pairs — one per matched
+        ancestor path — against which a milestone-like citeStructure's own
+        @match should be evaluated.
+
+        A flat, unnested milestone scheme (target_cs is itself a top-level
+        citeStructure, e.g. CTS-card's single-level card scheme) matches
+        directly against the document body, as before. A nested scheme
+        (e.g. book.card) instead matches against each element matched by
+        target_cs's parent level, mirroring how _walk_cs threads context
+        through every other citeStructure level.
+        """
+        root_list = self._root_level_cs_list()
+        if target_cs in root_list:
+            return [("", self._body)]
+        return self._find_milestone_parents("", root_list, self._body, target_cs)
+
+    def _find_milestone_parents(
+        self,
+        suffix: str,
+        cs_list: list[etree._Element],
+        context: etree._Element,
+        target_cs: etree._Element,
+    ) -> list[tuple[str, etree._Element]]:
+        results: list[tuple[str, etree._Element]] = []
+        for node in self._walk_cs(suffix, cs_list, context):
+            if target_cs in node.children:
+                results.append((node.suffix, node.element))
+            elif node.children:
+                results.extend(
+                    self._find_milestone_parents(
+                        node.suffix, node.children, node.element, target_cs
+                    )
+                )
+        return results
 
     def _candidates_at_level(
         self,
