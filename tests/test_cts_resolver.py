@@ -872,6 +872,58 @@ def test_flat_line_structure_raises_on_chunks(tmp_path):
         list(parser.chunks())
 
 
+WHOLE_WORK_BASE = "urn:cts:latinLit:phi0000.phi000.test-lat1"
+
+WHOLE_WORK_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="{TEI_NS}">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base" n="chunk" unit="work">
+              <citeStructure unit="line" delim=":" match=".//tei:l" use="@n"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text><body xml:base="{WHOLE_WORK_BASE}">
+        <l n="1">one</l><l n="2">two</l><l n="3">three</l>
+      </body></text>
+    </TEI>
+"""
+
+
+@pytest.fixture
+def whole_work_parser(tmp_path):
+    p = write_xml(tmp_path, WHOLE_WORK_XML)
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestChunkAttrOnRootCiteStructure:
+    """n="chunk" on the refsDecl's top-level wrapper citeStructure (e.g. a
+    short, undivided work like Horace's Ars Poetica) means: don't descend
+    into the child levels at all, treat the whole document as one chunk."""
+
+    def test_yields_exactly_one_chunk(self, whole_work_parser):
+        assert len(list(whole_work_parser.chunks())) == 1
+
+    def test_chunk_is_work_unit(self, whole_work_parser):
+        chunk = next(whole_work_parser.chunks())
+        assert chunk.unit == "work"
+
+    def test_chunk_urn_is_based_on_base_urn(self, whole_work_parser):
+        chunk = next(whole_work_parser.chunks())
+        assert chunk.cts_urn == f"{WHOLE_WORK_BASE}:1"
+        assert chunk.base_urn == WHOLE_WORK_BASE
+
+    def test_chunk_contains_every_line(self, whole_work_parser):
+        chunk = next(whole_work_parser.chunks())
+        assert [el.get("n") for el in chunk.elements] == ["1", "2", "3"]
+
+    def test_toc_is_empty(self, whole_work_parser):
+        assert whole_work_parser.toc() == []
+
+
 DRAMA_BASE = "urn:cts:greekLit:tlg0000.tlg000.test-grc1"
 
 DRAMA_XML = f"""\

@@ -508,7 +508,11 @@ class CTSResolver:
         an unrelated map is harmless but pointless.
         """
         chunk_cs = self._find_chunk_cs()
-        if unit_scheme_map is None and chunk_cs is self._root_cs:
+        if (
+            unit_scheme_map is None
+            and chunk_cs is self._root_cs
+            and self._is_wrapper_cs(chunk_cs)
+        ):
             # The whole document is the one chunk (see _whole_document_chunk)
             # — there is nothing beneath it to page between.
             return []
@@ -579,7 +583,7 @@ class CTSResolver:
     def chunks(self) -> Iterator[CitationChunk]:
         """Yield CitationChunk objects at the designated chunking level."""
         target_cs = self._find_chunk_cs()
-        if target_cs is self._root_cs:
+        if target_cs is self._root_cs and self._is_wrapper_cs(target_cs):
             yield self._whole_document_chunk(target_cs)
             return
         match_expr = target_cs.get("match", "")
@@ -587,6 +591,19 @@ class CTSResolver:
             yield from self._milestone_chunks(target_cs)
         else:
             yield from self._div_chunks(target_cs)
+
+    def _is_wrapper_cs(self, cs: etree._Element) -> bool:
+        """True when ``cs`` merely wraps deeper citeStructure levels (e.g.
+        the conventional match="/TEI/text/body" top level) rather than
+        being itself a real, matchable citation level.
+
+        A flat, single-level scheme (e.g. CTS-card's milestone-based card
+        citeStructure) has no nested tei:citeStructure children, so
+        ``self._root_cs`` there already *is* the one real level — n="chunk"
+        found on it must resolve through the normal div/milestone chunk
+        machinery, not _whole_document_chunk (which only applies when
+        root_cs is a genuine non-matchable wrapper around child levels)."""
+        return bool(cs.xpath("tei:citeStructure", namespaces=NS))
 
     def _whole_document_chunk(self, target_cs: etree._Element) -> CitationChunk:
         """Return the single CitationChunk for a document whose n="chunk" is
