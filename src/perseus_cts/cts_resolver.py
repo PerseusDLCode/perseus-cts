@@ -508,6 +508,10 @@ class CTSResolver:
         an unrelated map is harmless but pointless.
         """
         chunk_cs = self._find_chunk_cs()
+        if unit_scheme_map is None and chunk_cs is self._root_cs:
+            # The whole document is the one chunk (see _whole_document_chunk)
+            # — there is nothing beneath it to page between.
+            return []
         return self._toc_level(
             "", self._root_level_cs_list(), self._body, 0, chunk_cs, unit_scheme_map
         )
@@ -575,11 +579,36 @@ class CTSResolver:
     def chunks(self) -> Iterator[CitationChunk]:
         """Yield CitationChunk objects at the designated chunking level."""
         target_cs = self._find_chunk_cs()
+        if target_cs is self._root_cs:
+            yield self._whole_document_chunk(target_cs)
+            return
         match_expr = target_cs.get("match", "")
         if _match_local_name(match_expr) in _MILESTONE_LIKE_ELEMENTS:
             yield from self._milestone_chunks(target_cs)
         else:
             yield from self._div_chunks(target_cs)
+
+    def _whole_document_chunk(self, target_cs: etree._Element) -> CitationChunk:
+        """Return the single CitationChunk for a document whose n="chunk" is
+        declared on the refsDecl's top-level wrapper citeStructure itself
+        (e.g. a short, undivided work like Horace's Ars Poetica), rather
+        than on some citeStructure beneath it.
+
+        The wrapper's own @match/@use (conventionally
+        "/TEI/text/body"/"@xml:base") is pure document-structure
+        boilerplate shared by every citeStructure in the corpus, and
+        _root_level_cs_list always skips it when walking citation levels —
+        it carries no per-chunk value worth reading here. "1" stands in as
+        the sole passage token, keeping cts_urn in the same base_urn:passage
+        shape every other chunk (and _chunk_filename) expects, since there
+        is exactly one chunk to number.
+        """
+        return CitationChunk(
+            base_urn=self._base_urn,
+            cts_urn=f"{self._base_urn}:1",
+            unit=target_cs.get("unit", ""),
+            elements=list(self._body),
+        )
 
     def _find_chunk_cs(self) -> etree._Element:
         if self._chunk_unit_override is not None:
@@ -591,6 +620,8 @@ class CTSResolver:
                     f"No citeStructure with unit={self._chunk_unit_override!r} found"
                 )
             return found
+        if self._root_cs.get("n") == "chunk":
+            return self._root_cs
         found = self._find_cs_with_attr(self._root_cs, "n", "chunk")
         if found is not None:
             return found

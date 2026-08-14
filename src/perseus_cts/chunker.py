@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import re
 import json
+import re
 from pathlib import Path
 
 from lxml import etree
+
 from perseus_cts.constants import TEI_NS, XML_LANG
 from perseus_cts.cts_resolver import CTSResolver
-from perseus_cts.models import CTSCatalog, LenientTEIDocument, CitationChunk
+from perseus_cts.models import CitationChunk, CTSCatalog, LenientTEIDocument
 
 
 class Chunker:
