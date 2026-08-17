@@ -558,10 +558,21 @@ class CTSResolver:
                 else []
             )
             label_val = val or str(idx)
+            # Tragedy's "scene" divs (episode/choral/etc.) don't use @n for
+            # citation -- `use` above computes a line range instead -- so
+            # @n is free for an editor to hand-author an explicit display
+            # label (e.g. n="Parodos", n="First Stasimon", n="Monody") on
+            # divs they've actually checked. Only scene-unit divs honor
+            # this: other schemes (e.g. Thucydides book/chapter/section)
+            # already use @n to build the citation itself via `use="@n"`,
+            # so overriding their label here would be redundant, not new
+            # behavior, but keeping the override scoped to "scene" avoids
+            # any chance of it doing something unintended for those.
+            explicit_label = cand.get("n") if unit == "scene" else None
             entry = {
                 "depth": depth,
                 "index": idx,
-                "label": f"{unit.capitalize()} {label_val}",
+                "label": explicit_label or f"{unit.capitalize()} {label_val}",
                 "subtype": unit,
                 "urn": self._base_urn + new_suffix,
                 "subpassages": subpassages,

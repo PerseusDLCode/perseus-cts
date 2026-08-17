@@ -965,6 +965,61 @@ def drama_parser(tmp_path):
     return ReferenceParser(LenientTEIDocument(p))
 
 
+DRAMA_LABELED_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="scene" delim=":"
+                             match="tei:div[@type]"
+                             use="concat((.//l)[1]/@n, '-', (.//l)[last()]/@n)"
+                             n="chunk"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{DRAMA_BASE}">
+          <div type="episode" n="Prologue">
+            <l n="1">line one</l>
+            <l n="2">line two</l>
+          </div>
+          <div type="choral">
+            <l n="3">line three</l>
+          </div>
+        </body>
+      </text>
+    </TEI>"""
+
+
+@pytest.fixture
+def drama_labeled_parser(tmp_path):
+    p = tmp_path / "drama_labeled.xml"
+    p.write_text(DRAMA_LABELED_XML, encoding="utf-8")
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestSceneExplicitLabels:
+    """An editor-authored @n on a scene-unit div (e.g. n="Prologue") is
+    used verbatim as the TOC label instead of the default "Scene 1-2"
+    line-range label -- but only for the "scene" unit, and it never
+    changes the div's citation URN, which stays line-range-based."""
+
+    def test_explicit_n_used_as_label(self, drama_labeled_parser):
+        toc = drama_labeled_parser.toc()
+        assert toc[0]["label"] == "Prologue"
+
+    def test_missing_n_falls_back_to_default_label(self, drama_labeled_parser):
+        toc = drama_labeled_parser.toc()
+        assert toc[1]["label"] == "Scene 3-3"
+
+    def test_explicit_label_does_not_affect_urn(self, drama_labeled_parser):
+        toc = drama_labeled_parser.toc()
+        assert toc[0]["urn"] == f"{DRAMA_BASE}:1-2"
+
+
 class TestXPathUse:
     def test_chunk_count_equals_scene_count(self, drama_parser):
         assert len(list(drama_parser.chunks())) == 2
