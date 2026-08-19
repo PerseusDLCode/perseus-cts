@@ -8,7 +8,7 @@ from typing import Optional, cast
 
 from lxml import etree
 
-from perseus_cts.constants import NS, TEI_NS
+from perseus_cts.constants import NS, TEI_NS, XML_NS
 from perseus_cts.models import CitationChunk, CitationRecord
 from perseus_cts.models.document import LenientTEIDocument
 
@@ -21,6 +21,20 @@ _BARE_ELEMENT = re.compile(r"(?<![:\w@])([A-Za-z_][A-Za-z0-9_\-]*)(?![\w\-:(])")
 # _milestone_chunks), rather than treating each match as a self-contained
 # chunk (see _div_chunks).
 _MILESTONE_LIKE_ELEMENTS = {"milestone", "pb", "cb", "lb", "gb"}
+
+
+def _attr_name(attr: str) -> str:
+    """Resolve a citeStructure @use/@match attribute name (e.g. from the
+    "@xml:id" shorthand) to the form etree.Element.get() actually accepts.
+
+    lxml's .get() only recognizes the "xml:" prefix via Clark notation
+    ("{http://www.w3.org/XML/1998/namespace}id"), not the literal string
+    "xml:id" -- passing the prefixed form through unchanged always misses,
+    silently returning "" for every element (e.g. use="@xml:id" on a
+    milestone-based citeStructure)."""
+    if attr.startswith("xml:"):
+        return f"{{{XML_NS}}}{attr[4:]}"
+    return attr
 
 
 def _prefix_match_expr(expr: str, prefix: str) -> str:
@@ -262,7 +276,7 @@ class CTSResolver:
         Supports both the @attr shorthand and arbitrary XPath expressions."""
         use_attr = cs.get("use", "@n")
         if use_attr.startswith("@"):
-            return cand.get(use_attr[1:], "")
+            return cand.get(_attr_name(use_attr[1:]), "")
         results = cand.xpath(
             _prefix_match_expr(use_attr, self._doc_prefix),
             namespaces=self._ns_map,
@@ -355,7 +369,7 @@ class CTSResolver:
 
         matched: Optional[etree._Element] = None
         if use_attr.startswith("@"):
-            attr_name = use_attr[1:]
+            attr_name = _attr_name(use_attr[1:])
             for cand in candidates:
                 if cand.get(attr_name) == token:
                     matched = cand
@@ -720,7 +734,7 @@ class CTSResolver:
         delim = target_cs.get("delim", " ")
 
         def _val(ms: etree._Element) -> str:
-            return ms.get(use_attr[1:], "") if use_attr.startswith("@") else ""
+            return ms.get(_attr_name(use_attr[1:]), "") if use_attr.startswith("@") else ""
 
         # Like every other citeStructure level, a milestone-like level's
         # @match is relative to its *parent* level's matched element (e.g.
