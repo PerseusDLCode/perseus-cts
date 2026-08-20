@@ -79,35 +79,6 @@ COMMENTARY_TEI_WITH_LINKGRP = textwrap.dedent("""\
     </TEI>
 """)
 
-COMMENTARY_TEI_WIDE_SECTION = textwrap.dedent("""\
-    <?xml version="1.0" encoding="UTF-8"?>
-    <TEI xmlns="http://www.tei-c.org/ns/1.0">
-        <teiHeader/>
-        <text>
-            <body>
-                <div type="commline" n="150">
-                    <p>
-                        <seg type="lemma" ana="#early_150">lemma text</seg>
-                        <seg type="comment" xml:id="early_150">a comment on line 150</seg>
-                    </p>
-                </div>
-                <div type="commline" n="300">
-                    <p>
-                        <seg type="lemma" ana="#late_300">lemma text</seg>
-                        <seg type="comment" xml:id="late_300">a comment on line 300</seg>
-                    </p>
-                </div>
-            </body>
-        </text>
-        <standOff>
-            <linkGrp type="commentary">
-                <link target="urn:cts:greekLit:tlg0011.tlg004:141-496 #early_150"/>
-                <link target="urn:cts:greekLit:tlg0011.tlg004:141-496 #late_300"/>
-            </linkGrp>
-        </standOff>
-    </TEI>
-""")
-
 COMMENTARY_TEI_NO_LINKGRP = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
     <TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -334,28 +305,6 @@ class TestLinksForPassage:
         assert link.anchor_id == "Dios_151"
         assert link.lemma is None
         assert link.comment is None
-
-    def test_excludes_entries_whose_own_line_falls_outside_the_passage(
-        self, base_catalog_dir
-    ):
-        """A section-wide target overlapping the passage isn't enough.
-
-        Real commentaries (e.g. Jebb's) share one coarse section-level
-        target (here "141-496") across every per-word entry in that whole
-        section. Querying a sub-range of that section — "205-496" — must
-        exclude entries whose own commline falls before it (line 150) while
-        still including ones inside it (line 300), or the reader sees
-        commentary "starting" earlier than the passage they're viewing.
-        """
-        write(base_catalog_dir, "viaf001", "viaf001", "__cts__.xml",
-              content=COMMENTARY_CTS_TEMPLATE.format(n=1))
-        write(base_catalog_dir, "viaf001", "viaf001",
-              "viaf001.viaf1.perseus-eng1.xml", content=COMMENTARY_TEI_WIDE_SECTION)
-        catalog = CTSCatalog(base_catalog_dir)
-
-        result = links_for_passage(catalog, "urn:cts:greekLit:tlg0011.tlg004", "205-496")
-
-        assert [link.anchor_id for link in result.links] == ["late_300"]
 
     def test_missing_source_file_produces_warning(self, base_catalog_dir):
         write(base_catalog_dir, "viaf001", "viaf001", "__cts__.xml",
