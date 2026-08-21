@@ -766,6 +766,79 @@ class TestChunksMilestoneBased:
         assert divs1[0][0].text == "card 2 content"
 
 
+INLINE_MILESTONE_BASE = "urn:cts:myexample:author.work.edition"
+
+INLINE_MILESTONE_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/TEI/text/body" use="@xml:base">
+              <citeStructure match="div[@type='book']" use="@n" unit="book" delim=":">
+                <citeStructure match=".//milestone[@unit='chapter']" use="@n"
+                               unit="chapter" delim="." n="chunk"/>
+              </citeStructure>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{INLINE_MILESTONE_BASE}">
+          <div type="book" n="1">
+            <p><milestone unit="chapter" n="1"/>Prose right after the milestone
+               <hi>an inline note</hi> and more prose in the same paragraph.</p>
+            <p>A second paragraph still in chapter one.</p>
+            <p><milestone unit="chapter" n="2"/>Chapter two prose with nothing
+               else in its paragraph.</p>
+          </div>
+        </body>
+      </text>
+    </TEI>"""
+
+
+@pytest.fixture
+def inline_milestone_parser(tmp_path):
+    p = tmp_path / "inline_milestone.xml"
+    p.write_text(INLINE_MILESTONE_XML, encoding="utf-8")
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestChunksMilestoneInlineWithinParagraph:
+    """A milestone-based chunk boundary is frequently *inside* running
+    prose (e.g. a chapter break mid-<p>) rather than a direct sibling of
+    the content it delimits. The text immediately following such a
+    milestone -- and, symmetrically, up to the next one -- must not be
+    lost just because it isn't wrapped in its own element."""
+
+    def test_chunk_count_equals_milestone_count(self, inline_milestone_parser):
+        assert len(list(inline_milestone_parser.chunks())) == 2
+
+    def test_first_chunk_includes_text_immediately_after_milestone(
+        self, inline_milestone_parser
+    ):
+        chunks = list(inline_milestone_parser.chunks())
+        text = "".join("".join(e.itertext()) for e in chunks[0].elements)
+        assert "Prose right after the milestone" in text
+
+    def test_first_chunk_includes_text_after_inline_element(
+        self, inline_milestone_parser
+    ):
+        chunks = list(inline_milestone_parser.chunks())
+        text = "".join("".join(e.itertext()) for e in chunks[0].elements)
+        assert "and more prose in the same paragraph" in text
+
+    def test_first_chunk_includes_following_paragraph(self, inline_milestone_parser):
+        chunks = list(inline_milestone_parser.chunks())
+        text = "".join("".join(e.itertext()) for e in chunks[0].elements)
+        assert "A second paragraph still in chapter one" in text
+
+    def test_second_chunk_is_not_empty(self, inline_milestone_parser):
+        chunks = list(inline_milestone_parser.chunks())
+        text = "".join("".join(e.itertext()) for e in chunks[1].elements)
+        assert "Chapter two prose" in text
+
+
 PB_BASE = "urn:cts:greekLit:tlg0084.tlg001.1st1K-grc1"
 
 PB_XML = f"""\
