@@ -74,29 +74,85 @@ def copy_before(
     return new
 
 
+def _tail_copy(
+    parent: etree._Element,
+    marker: etree._Element,
+    stop: etree._Element | None,
+) -> tuple[etree._Element | None, bool]:
+    """Copy of `parent` holding only the content after `marker` (a direct
+    child of parent, whose own .tail starts the copy) and before `stop` (a
+    descendant of parent, if given).
+
+    Returns (copy, stop_found); copy is None when there is nothing after
+    `marker` within `parent` before `stop`/parent's end, so the caller
+    doesn't have to filter out empty shells."""
+    new = etree.Element(parent.tag, attrib=cast(dict[str, str], parent.attrib))
+    new.text = marker.tail
+    has_content = bool(marker.tail and marker.tail.strip())
+    seen_marker = False
+    stop_found = False
+    for child in parent:
+        if not seen_marker:
+            if child is marker:
+                seen_marker = True
+            continue
+        if child is stop:
+            stop_found = True
+            break
+        if stop is not None and any(desc is stop for desc in child.iter()):
+            new.append(copy_before(child, stop))
+            has_content = True
+            stop_found = True
+            break
+        new.append(deepcopy(child))
+        has_content = True
+    if not has_content:
+        return None, stop_found
+    return new, stop_found
+
+
 def elements_between(
     root: etree._Element,
     start_ms: etree._Element,
     end_ms: etree._Element | None,
 ) -> list[etree._Element]:
-    """Return top-level elements between two milestones in document order."""
-    all_elements = list(root.iter())
-    pos = {id(e): i for i, e in enumerate(all_elements)}
+    """Return top-level elements between two milestones in document order,
+    reopening any ancestor elements the milestones interrupt.
 
-    start = pos[id(start_ms)]
-    end = pos[id(end_ms)] if end_ms is not None else len(all_elements)
+    A milestone marking a chunk boundary is frequently *inside* running
+    prose (e.g. a chapter break mid-<p>) rather than a direct sibling of
+    the content it delimits, so this can't simply scan flat document
+    position: content immediately after start_ms is that same paragraph's
+    tail text and later siblings, not a self-contained "hit" element of
+    its own. This walks start_ms's ancestor chain from the bottom up,
+    peeling off "everything after this point" at each level (via
+    _tail_copy) until end_ms is found or the walk reaches `root`, then
+    continues across `root`'s own following siblings the same way
+    copy_before already does for a single-container stop point."""
+    fragments: list[etree._Element] = []
 
-    # Comments and PIs are non-content asides that can legally sit directly
-    # in body (e.g. an editor's commented-out <div>); their .tag is a Cython
-    # function rather than a string, which crashes etree.Element() in
-    # copy_before if one is picked as a top-level hit.
-    hits = [
-        e for e in all_elements if start < pos[id(e)] < end and isinstance(e.tag, str)
-    ]
-    hit_ids = {id(e) for e in hits}
-    top = [e for e in hits if not any(id(a) in hit_ids for a in e.iterancestors())]
+    node = start_ms
+    parent = node.getparent()
+    while parent is not None and parent is not root:
+        frag, stop_found = _tail_copy(parent, node, end_ms)
+        if frag is not None:
+            fragments.append(frag)
+        if stop_found:
+            return fragments
+        node = parent
+        parent = node.getparent()
 
-    return [copy_before(el, end_ms) for el in top]
+    for sib in node.itersiblings():
+        if not isinstance(sib.tag, str):
+            continue
+        if sib is end_ms:
+            break
+        if end_ms is not None and any(desc is end_ms for desc in sib.iter()):
+            fragments.append(copy_before(sib, end_ms))
+            break
+        fragments.append(deepcopy(sib))
+
+    return fragments
 
 
 @dataclass
