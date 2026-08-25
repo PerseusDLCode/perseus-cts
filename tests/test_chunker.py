@@ -136,3 +136,38 @@ class TestChunkerCatalogTitle:
         )
         chunker = Chunker(trachiniae_doc, catalog=catalog)
         assert chunker._catalog_title("fre") == ""
+
+
+TRACHINIAE_WORK_CTS_WITH_ABOUT = TRACHINIAE_WORK_CTS.replace(
+    '<ti:description xml:lang="mul">Sophocles, ed. Perseus.</ti:description>\n',
+    '<ti:description xml:lang="mul">Sophocles, ed. Perseus.</ti:description>\n'
+    '        <ti:about urn="urn:cts:greekLit:tlg0011.tlg001"/>\n',
+)
+
+
+class TestChunkerCatalogAbout:
+    """metadata.json's document.about records <ti:about>, letting mvp's
+    siblings.py align a commentary's siblings to the work it comments on."""
+
+    def test_about_recorded_when_present(self, trachiniae_doc, tmp_path):
+        catalog = _make_trachiniae_catalog(
+            tmp_path, content=TRACHINIAE_WORK_CTS_WITH_ABOUT
+        )
+        chunker = Chunker(trachiniae_doc, catalog=catalog)
+        chunker.compile(tmp_path / "out")
+        metadata = json.loads((tmp_path / "out" / "metadata.json").read_text())
+        assert metadata["document"]["about"] == "urn:cts:greekLit:tlg0011.tlg001"
+
+    def test_about_absent_defaults_to_none(
+        self, trachiniae_doc, trachiniae_catalog, tmp_path
+    ):
+        chunker = Chunker(trachiniae_doc, catalog=trachiniae_catalog)
+        chunker.compile(tmp_path)
+        metadata = json.loads((tmp_path / "metadata.json").read_text())
+        assert metadata["document"]["about"] is None
+
+    def test_about_none_without_catalog(self, trachiniae_doc, tmp_path):
+        chunker = Chunker(trachiniae_doc)
+        chunker.compile(tmp_path)
+        metadata = json.loads((tmp_path / "metadata.json").read_text())
+        assert metadata["document"]["about"] is None

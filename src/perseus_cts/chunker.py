@@ -95,6 +95,21 @@ class Chunker:
             return ""
         return work.title_for(language)
 
+    def _catalog_about(self) -> str | None:
+        """Look up this version's <ti:about> urn from __cts__.xml, if any.
+
+        Set on commentary versions to name the work/passage they comment on;
+        recorded in metadata.json so mvp's siblings.py can align a
+        commentary's sibling editions/translations to the work it is about
+        rather than to its own (nonexistent) work family.
+        """
+        if self.catalog is None:
+            return None
+        version = self.catalog.version_for(self.cts_resolver.base_urn)
+        if version is None:
+            return None
+        return version.about
+
     def _build_document_metadata(self) -> dict:
         NS = {"tei": TEI_NS}
         root = self.tei_doc.root
@@ -166,4 +181,5 @@ class Chunker:
             "editors": editors,
             "pub_place": pub_place,
             "pub_date": pub_date,
+            "about": self._catalog_about(),
         }
