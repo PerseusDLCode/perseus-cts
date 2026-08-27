@@ -1234,3 +1234,84 @@ class TestAvailableRefsDeclIds:
 
     def test_apology_declares_single_scheme(self, apology_doc):
         assert available_refsDecl_ids(apology_doc) == ["CTS"]
+
+
+# ---------------------------------------------------------------------------
+# A play whose citeStructure declares sibling unit types at the same level
+# (act, alongside prologue/epilogue) -- e.g. Shakespeare's TEI encodings,
+# whose refsDecl[@xml:id='CTS'] lists <citeStructure unit="act">,
+# <citeStructure unit="induction">, <citeStructure unit="prologue">,
+# <citeStructure unit="epilogue">, and <citeStructure unit="chorus"> as
+# siblings, each independently matched against the body.
+# ---------------------------------------------------------------------------
+
+PLAY_BASE = "urn:cts:engLit:play.test"
+
+PLAY_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/tei:TEI/tei:text/tei:body" use="@xml:base">
+              <citeStructure unit="act" delim=":" match="tei:div[@type='act']" use="@n">
+                <citeStructure unit="scene" delim="." match="tei:div[@type='scene']"
+                               use="@n" n="chunk"/>
+              </citeStructure>
+              <citeStructure unit="prologue" delim=":" match="tei:div[@type='prologue']"
+                             use="@n"/>
+              <citeStructure unit="epilogue" delim=":" match="tei:div[@type='epilogue']"
+                             use="@n"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{PLAY_BASE}">
+          <div type="prologue" n="PRO">
+            <l n="1">prologue line</l>
+          </div>
+          <div type="act" n="1">
+            <div type="scene" n="1">
+              <l n="1">act 1 scene 1 line</l>
+            </div>
+          </div>
+          <div type="epilogue" n="EPI">
+            <l n="1">epilogue line</l>
+          </div>
+        </body>
+      </text>
+    </TEI>"""
+
+
+@pytest.fixture
+def play_parser(tmp_path):
+    p = write_xml(tmp_path, PLAY_XML)
+    return ReferenceParser(LenientTEIDocument(p))
+
+
+class TestSiblingCiteStructures:
+    """toc() must walk every citeStructure sibling at a level (not just
+    the first), merging their matches into a single document-ordered list."""
+
+    def test_toc_includes_every_sibling_unit_type(self, play_parser):
+        toc = play_parser.toc()
+        assert [e["subtype"] for e in toc] == ["prologue", "act", "epilogue"]
+
+    def test_toc_preserves_document_order(self, play_parser):
+        toc = play_parser.toc()
+        assert [e["urn"] for e in toc] == [
+            f"{PLAY_BASE}:PRO",
+            f"{PLAY_BASE}:1",
+            f"{PLAY_BASE}:EPI",
+        ]
+
+    def test_act_subpassages_still_resolve(self, play_parser):
+        toc = play_parser.toc()
+        act_entry = next(e for e in toc if e["subtype"] == "act")
+        assert [s["subtype"] for s in act_entry["subpassages"]] == ["scene"]
+
+    def test_prologue_and_epilogue_are_leaves(self, play_parser):
+        toc = play_parser.toc()
+        assert toc[0]["subpassages"] == []
+        assert toc[2]["subpassages"] == []

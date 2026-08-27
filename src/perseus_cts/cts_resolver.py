@@ -601,56 +601,71 @@ class CTSResolver:
     ) -> list[dict]:
         if not cs_list:
             return []
-        cs = cs_list[0]
-        cs_children: list[etree._Element] = cast(
-            list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
-        )
-        # When cs has no children of its own, treat remaining siblings as the next level
-        sub_cs = cs_children if cs_children else cs_list[1:]
-        is_chunk_level = cs is chunk_cs
-        # Only stop recursion at the chunk level in the single-scheme
-        # (no map) case — with a map, every level down to the true leaf is
-        # wanted so each paginated level can carry its own link.
-        stop_recursion = unit_scheme_map is None and is_chunk_level
-        match_expr = cs.get("match", "")
-        delim = cs.get("delim", ":")
-        unit = cs.get("unit", "")
-        candidates = self._match(match_expr, context)
-        entries: list[dict] = []
-        for idx, cand in enumerate(candidates, 1):
-            val = self._eval_use(cs, cand)
-            new_suffix = suffix + delim + val
-            subpassages = (
-                self._toc_level(
-                    new_suffix, sub_cs, cand, depth + 1, chunk_cs, unit_scheme_map
-                )
-                if sub_cs and not stop_recursion
-                else []
+        # A level may hold more than one citeStructure sibling (e.g. a
+        # play's act/induction/prologue/epilogue/chorus, all matched
+        # against the same body context) -- these are alternative unit
+        # types occupying the same structural level, not a chain, so every
+        # one of them must be matched and walked (mirrors _walk_cs), not
+        # just cs_list[0].
+        tagged_entries: list[tuple[etree._Element, dict]] = []
+        for cs in cs_list:
+            cs_children: list[etree._Element] = cast(
+                list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
             )
-            label_val = val or str(idx)
-            # Tragedy's "scene" divs (episode/choral/etc.) don't use @n for
-            # citation -- `use` above computes a line range instead -- so
-            # @n is free for an editor to hand-author an explicit display
-            # label (e.g. n="Parodos", n="First Stasimon", n="Monody") on
-            # divs they've actually checked. Only scene-unit divs honor
-            # this: other schemes (e.g. Thucydides book/chapter/section)
-            # already use @n to build the citation itself via `use="@n"`,
-            # so overriding their label here would be redundant, not new
-            # behavior, but keeping the override scoped to "scene" avoids
-            # any chance of it doing something unintended for those.
-            explicit_label = cand.get("n") if unit == "scene" else None
-            entry = {
-                "depth": depth,
-                "index": idx,
-                "label": explicit_label or f"{unit.capitalize()} {label_val}",
-                "subtype": unit,
-                "urn": self._base_urn + new_suffix,
-                "subpassages": subpassages,
-            }
-            if unit_scheme_map is not None:
-                entry["scheme"] = unit_scheme_map.get(unit)
-            entries.append(entry)
-        return entries
+            is_chunk_level = cs is chunk_cs
+            # Only stop recursion at the chunk level in the single-scheme
+            # (no map) case — with a map, every level down to the true leaf
+            # is wanted so each paginated level can carry its own link.
+            stop_recursion = unit_scheme_map is None and is_chunk_level
+            match_expr = cs.get("match", "")
+            delim = cs.get("delim", ":")
+            unit = cs.get("unit", "")
+            candidates = self._match(match_expr, context)
+            for idx, cand in enumerate(candidates, 1):
+                val = self._eval_use(cs, cand)
+                new_suffix = suffix + delim + val
+                subpassages = (
+                    self._toc_level(
+                        new_suffix, cs_children, cand, depth + 1, chunk_cs, unit_scheme_map
+                    )
+                    if cs_children and not stop_recursion
+                    else []
+                )
+                label_val = val or str(idx)
+                # Tragedy's "scene" divs (episode/choral/etc.) don't use @n for
+                # citation -- `use` above computes a line range instead -- so
+                # @n is free for an editor to hand-author an explicit display
+                # label (e.g. n="Parodos", n="First Stasimon", n="Monody") on
+                # divs they've actually checked. Only scene-unit divs honor
+                # this: other schemes (e.g. Thucydides book/chapter/section)
+                # already use @n to build the citation itself via `use="@n"`,
+                # so overriding their label here would be redundant, not new
+                # behavior, but keeping the override scoped to "scene" avoids
+                # any chance of it doing something unintended for those.
+                explicit_label = cand.get("n") if unit == "scene" else None
+                entry = {
+                    "depth": depth,
+                    "index": idx,
+                    "label": explicit_label or f"{unit.capitalize()} {label_val}",
+                    "subtype": unit,
+                    "urn": self._base_urn + new_suffix,
+                    "subpassages": subpassages,
+                }
+                if unit_scheme_map is not None:
+                    entry["scheme"] = unit_scheme_map.get(unit)
+                tagged_entries.append((cand, entry))
+
+        if len(cs_list) > 1:
+            # Sibling unit types can interleave in the source document
+            # (e.g. a "prologue" div before "act" 1, or an "epilogue" div
+            # after the last act) -- restore document order across them.
+            # context.iter() walks in document order, so a single pass
+            # gives every matched candidate's relative position regardless
+            # of which citeStructure or how deep beneath context it matched.
+            doc_order = {id(el): i for i, el in enumerate(context.iter())}
+            tagged_entries.sort(key=lambda pair: doc_order.get(id(pair[0]), 0))
+
+        return [entry for _, entry in tagged_entries]
 
     def citations(self, depth: int = -1) -> Iterator[str]:
         """Yield every resolvable CTS URN in document order."""
