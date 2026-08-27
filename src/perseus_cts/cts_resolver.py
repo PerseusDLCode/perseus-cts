@@ -326,13 +326,37 @@ class CTSResolver:
                     f"must be ':' (CTS passage separator)"
                 )
 
-    def _eval_use(self, cs: etree._Element, cand: etree._Element) -> str:
+    def _eval_use(
+        self,
+        cs: etree._Element,
+        cand: etree._Element,
+        context: etree._Element | None = None,
+    ) -> str:
         """Evaluate a citeStructure @use expression against a candidate element.
 
-        Supports both the @attr shorthand and arbitrary XPath expressions."""
+        Supports the @attr shorthand, the TEI-spec-sanctioned positional
+        function use="position()", and arbitrary XPath expressions.
+
+        position() has no meaning evaluated as a one-off query against a
+        single element (lxml raises "Invalid context position") -- per the
+        spec it names the candidate's 1-based rank among everything cs's own
+        @match selected from ``context``, so it must be computed from that
+        candidate list rather than handed to cand.xpath() like other @use
+        expressions. This only recognizes the exact, unadorned "position()"
+        form (the one seen in practice, e.g. Shakespeare's globe
+        citeStructures); position() embedded in a larger expression (e.g.
+        concat('L', position())) isn't given real XPath context-position
+        semantics here and would evaluate as if position() answers node-set
+        size 1's position, i.e. always "1"."""
         use_attr = cs.get("use", "@n")
         if use_attr.startswith("@"):
             return cand.get(_attr_name(use_attr[1:]), "")
+        if use_attr.strip() == "position()" and context is not None:
+            candidates = self._match(cs.get("match", ""), context)
+            for i, c in enumerate(candidates, 1):
+                if c is cand:
+                    return str(i)
+            return ""
         results = cand.xpath(
             _prefix_match_expr(use_attr, self._doc_prefix),
             namespaces=self._ns_map,
@@ -424,12 +448,10 @@ class CTSResolver:
         candidates: list[etree._Element] = self._match(match_expr, context)
 
         matched: Optional[etree._Element] = None
-        if use_attr.startswith("@"):
-            attr_name = _attr_name(use_attr[1:])
-            for cand in candidates:
-                if cand.get(attr_name) == token:
-                    matched = cand
-                    break
+        for cand in candidates:
+            if self._eval_use(cs, cand, context) == token:
+                matched = cand
+                break
 
         if matched is None:
             raise CitationError(
@@ -454,13 +476,13 @@ class CTSResolver:
                 f"is not reachable via the active citeStructure"
             )
         parts: list[str] = []
-        for cs, elem in path:
+        for cs, elem, ctx in path:
             delim = cs.get("delim")
             if delim is None:
                 raise ConfigurationError(
                     f"<citeStructure unit={cs.get('unit')!r}> is missing required @delim"
                 )
-            val = self._eval_use(cs, elem)
+            val = self._eval_use(cs, elem, ctx)
             parts.append(delim + val)
         return self._base_urn + "".join(parts)
 
@@ -469,13 +491,13 @@ class CTSResolver:
         target: etree._Element,
         cs_list: list[etree._Element],
         context: etree._Element,
-    ) -> Optional[list[tuple[etree._Element, etree._Element]]]:
+    ) -> Optional[list[tuple[etree._Element, etree._Element, etree._Element]]]:
         for cs in cs_list:
             match_expr = cs.get("match", "")
             candidates: list[etree._Element] = self._match(match_expr, context)
 
             if any(cand is target for cand in candidates):
-                return [(cs, target)]
+                return [(cs, target, context)]
 
             children: list[etree._Element] = cast(
                 list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
@@ -486,7 +508,7 @@ class CTSResolver:
             for cand in candidates:
                 result = self._find_path_to(target, children, cand)
                 if result is not None:
-                    return [(cs, cand)] + result
+                    return [(cs, cand, context)] + result
 
         return None
 
@@ -520,7 +542,7 @@ class CTSResolver:
             )
             candidates: list[etree._Element] = self._match(match_expr, context)
             for cand in candidates:
-                val = self._eval_use(cs, cand)
+                val = self._eval_use(cs, cand, context)
                 yield _CSNode(
                     cs=cs,
                     element=cand,
@@ -632,7 +654,7 @@ class CTSResolver:
             unit = cs.get("unit", "")
             candidates = self._match(match_expr, context)
             for idx, cand in enumerate(candidates, 1):
-                val = self._eval_use(cs, cand)
+                val = self._eval_use(cs, cand, context)
                 new_suffix = suffix + delim + val
                 subpassages = (
                     self._toc_level(
