@@ -586,9 +586,19 @@ class CTSResolver:
             # The whole document is the one chunk (see _whole_document_chunk)
             # — there is nothing beneath it to page between.
             return []
-        return self._toc_level(
-            "", self._root_level_cs_list(), self._body, 0, chunk_cs, unit_scheme_map
-        )
+        branches = self._chunk_branches(chunk_cs)
+        # Every structural sibling stops recursion at its own chunking
+        # level, same as chunks() -- for the branch owning chunk_cs that's
+        # chunk_cs itself; every other structural sibling (e.g. a
+        # "prologue" that declares its own nested "line" citeStructure
+        # purely for fine-grained citation, mirroring act > scene > line)
+        # stops at _branch_chunk_cs(cs), so that optional deeper level
+        # doesn't leak into the TOC as if it were real subpassages.
+        stop_cs = {
+            chunk_cs if self._branch_contains(cs, chunk_cs) else self._branch_chunk_cs(cs)
+            for cs in branches
+        }
+        return self._toc_level("", branches, self._body, 0, stop_cs, unit_scheme_map)
 
     def _toc_level(
         self,
@@ -596,7 +606,7 @@ class CTSResolver:
         cs_list: list[etree._Element],
         context: etree._Element,
         depth: int,
-        chunk_cs: etree._Element,
+        stop_cs: set[etree._Element],
         unit_scheme_map: dict[str, str] | None,
     ) -> list[dict]:
         if not cs_list:
@@ -612,7 +622,7 @@ class CTSResolver:
             cs_children: list[etree._Element] = cast(
                 list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
             )
-            is_chunk_level = cs is chunk_cs
+            is_chunk_level = cs in stop_cs
             # Only stop recursion at the chunk level in the single-scheme
             # (no map) case — with a map, every level down to the true leaf
             # is wanted so each paginated level can carry its own link.
@@ -626,7 +636,7 @@ class CTSResolver:
                 new_suffix = suffix + delim + val
                 subpassages = (
                     self._toc_level(
-                        new_suffix, cs_children, cand, depth + 1, chunk_cs, unit_scheme_map
+                        new_suffix, cs_children, cand, depth + 1, stop_cs, unit_scheme_map
                     )
                     if cs_children and not stop_recursion
                     else []
@@ -677,16 +687,140 @@ class CTSResolver:
         )
 
     def chunks(self) -> Iterator[CitationChunk]:
-        """Yield CitationChunk objects at the designated chunking level."""
+        """Yield CitationChunk objects at the designated chunking level.
+
+        ``_find_chunk_cs`` locates one primary target level (the
+        citeStructure marked n="chunk", or the usual penultimate-level
+        fallback) by searching the *whole* citeStructure tree, which is
+        correct as long as the tree has a single root-level branch. A
+        document like a play, whose refsDecl declares "act" (containing
+        the chunked "scene" level) alongside structural siblings such as
+        "prologue"/"induction"/"epilogue"/"chorus" (see _chunk_branches),
+        has more than one such branch -- each of those siblings has no
+        chunked descendant of its own and would silently contribute zero
+        chunks if only the primary target were used. Every other
+        *structural* root-level branch (see _chunk_branches) is therefore
+        given its own natural chunking level (_branch_chunk_cs) and all
+        branches' chunks are merged into one document-ordered sequence, so
+        a reader can actually open (and page prev/next through) a
+        "Prologue" or "Induction" the same as any scene.
+        """
         target_cs = self._find_chunk_cs()
         if target_cs is self._root_cs and self._is_wrapper_cs(target_cs):
             yield self._whole_document_chunk(target_cs)
             return
+
+        branches = self._chunk_branches(target_cs)
+        branch_targets = [
+            target_cs if self._branch_contains(cs, target_cs) else self._branch_chunk_cs(cs)
+            for cs in branches
+        ]
+
+        if len(branch_targets) == 1:
+            yield from self._chunks_for_target(branch_targets[0])
+            return
+
+        all_chunks = [
+            chunk for bt in branch_targets for chunk in self._chunks_for_target(bt)
+        ]
+        doc_order = {id(el): i for i, el in enumerate(self._body.iter())}
+        all_chunks.sort(key=lambda c: doc_order.get(id(c.elements[0]), 0))
+
+        for i, chunk in enumerate(all_chunks):
+            chunk.prev_urn = all_chunks[i - 1].cts_urn if i > 0 else None
+            chunk.next_urn = all_chunks[i + 1].cts_urn if i + 1 < len(all_chunks) else None
+            yield chunk
+
+    def _chunk_branches(self, chunk_cs: etree._Element) -> list[etree._Element]:
+        """Return the root-level citeStructure branches that get their own
+        toc()/chunks() entries.
+
+        Most documents have exactly one branch, returned unchanged. A
+        document may declare more (see _root_level_cs_list) for two very
+        different reasons, which this must tell apart:
+
+        - Genuine structural divisions, matched against the same element
+          type as the branch that owns ``chunk_cs`` -- e.g. a play's
+          "prologue"/"induction"/"epilogue"/"chorus", declared as
+          div-matching siblings of "act" (which contains the chunked
+          "scene" level). These belong in the TOC and get their own
+          chunks (see _branch_chunk_cs), same as any scene.
+
+        - An alternate, finer-grained citation path layered on top of the
+          real structure -- overwhelmingly a "line" citeStructure matching
+          bare ``l``/content elements already reachable *inside* the
+          chunked branch (the extremely common card+line / scene+line
+          pattern across this corpus). Walking this as its own branch
+          would flood the TOC and filesystem with one entry per line; it
+          stays resolvable via resolve()/generate()/citations(), just not
+          listed or chunked on its own.
+
+        The heuristic: a sibling only counts as a structural division when
+        its own @match targets the same element type as the branch owning
+        the chunk level.
+        """
+        root_list = self._root_level_cs_list()
+        if len(root_list) == 1:
+            return root_list
+        owning_branch = next(
+            (cs for cs in root_list if self._branch_contains(cs, chunk_cs)), None
+        )
+        if owning_branch is None:
+            return root_list
+        owning_name = _match_local_name(owning_branch.get("match", ""))
+        return [
+            cs
+            for cs in root_list
+            if cs is owning_branch or _match_local_name(cs.get("match", "")) == owning_name
+        ]
+
+    def _chunks_for_target(self, target_cs: etree._Element) -> Iterator[CitationChunk]:
         match_expr = target_cs.get("match", "")
         if _match_local_name(match_expr) in _MILESTONE_LIKE_ELEMENTS:
             yield from self._milestone_chunks(target_cs)
         else:
             yield from self._div_chunks(target_cs)
+
+    def _branch_contains(
+        self, branch_cs: etree._Element, target_cs: etree._Element
+    ) -> bool:
+        """True when ``target_cs`` is ``branch_cs`` itself or one of its
+        descendant citeStructure levels."""
+        if branch_cs is target_cs:
+            return True
+        return any(
+            self._branch_contains(child, target_cs)
+            for child in cast(
+                list[etree._Element],
+                branch_cs.xpath("tei:citeStructure", namespaces=NS),
+            )
+        )
+
+    def _branch_chunk_cs(self, branch_cs: etree._Element) -> etree._Element:
+        """Return the chunking-level citeStructure for one root-level
+        branch: the descendant explicitly marked n="chunk" within it, or
+        (absent one) branch_cs itself.
+
+        Unlike the primary branch (whose _find_chunk_cs fallback descends
+        to the *penultimate* level when nothing is explicitly marked --
+        appropriate there because self._root_cs is always a throwaway
+        wrapper, never itself a real citable level), branch_cs here is
+        already a real, independently matchable level -- e.g. a play's
+        "prologue", which may declare its own nested "line" citeStructure
+        purely for fine-grained citation (mirroring "act" > "scene" >
+        "line"), without ever marking a chunk level of its own. Absent an
+        explicit n="chunk", the sanest default is branch_cs itself (one
+        chunk per matched prologue/induction/epilogue/chorus div), not an
+        auto-descent into that finer level -- descending would either
+        over-fragment a branch several levels deep or, for a single
+        nested child like "line", silently produce one chunk per line.
+        """
+        if branch_cs.get("n") == "chunk":
+            return branch_cs
+        found = self._find_cs_with_attr(branch_cs, "n", "chunk")
+        if found is not None:
+            return found
+        return branch_cs
 
     def _is_wrapper_cs(self, cs: etree._Element) -> bool:
         """True when ``cs`` merely wraps deeper citeStructure levels (e.g.
@@ -765,22 +899,32 @@ class CTSResolver:
     def _deepest_chain(self) -> list[etree._Element]:
         """Return the citeStructure levels from the root wrapper down to the
         deepest (first-child) leaf, in order."""
+        return self._deepest_chain_in(self._root_cs)
+
+    def _deepest_chain_in(self, cs: etree._Element) -> list[etree._Element]:
+        """Return the citeStructure levels from ``cs`` down to its deepest
+        (first-child) leaf, in order -- the branch-scoped generalization of
+        _deepest_chain, used by _branch_chunk_cs for siblings of the
+        document's primary root-level branch."""
         path: list[etree._Element] = []
-        cs = self._root_cs
+        node = cs
         while True:
             children: list[etree._Element] = cast(
-                list[etree._Element], cs.xpath("tei:citeStructure", namespaces=NS)
+                list[etree._Element], node.xpath("tei:citeStructure", namespaces=NS)
             )
             if not children:
                 break
-            cs = children[0]
-            path.append(cs)
+            node = children[0]
+            path.append(node)
         return path
 
     def _penultimate_cs(self) -> etree._Element:
-        path = self._deepest_chain()
+        return self._penultimate_in(self._root_cs)
+
+    def _penultimate_in(self, cs: etree._Element) -> etree._Element:
+        path = self._deepest_chain_in(cs)
         if not path:
-            return self._root_cs
+            return cs
         if len(path) == 1:
             return path[0]
         return path[-2]

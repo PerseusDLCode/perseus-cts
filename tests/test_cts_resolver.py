@@ -1259,7 +1259,9 @@ PLAY_XML = f"""\
                                use="@n" n="chunk"/>
               </citeStructure>
               <citeStructure unit="prologue" delim=":" match="tei:div[@type='prologue']"
-                             use="@n"/>
+                             use="@n">
+                <citeStructure unit="line" delim="." match="tei:l" use="@n"/>
+              </citeStructure>
               <citeStructure unit="epilogue" delim=":" match="tei:div[@type='epilogue']"
                              use="@n"/>
             </citeStructure>
@@ -1315,3 +1317,57 @@ class TestSiblingCiteStructures:
         toc = play_parser.toc()
         assert toc[0]["subpassages"] == []
         assert toc[2]["subpassages"] == []
+
+    def test_chunks_include_every_sibling_unit_type(self, play_parser):
+        """A structural sibling with no explicit n="chunk" (prologue,
+        epilogue) still gets its own single chunk -- one per matched div,
+        not zero (the branch silently contributing nothing) and not one
+        per line (over-descending into prologue's own nested "line"
+        citeStructure, present only for optional fine-grained citation --
+        see _branch_chunk_cs)."""
+        chunks = list(play_parser.chunks())
+        assert [c.unit for c in chunks] == ["prologue", "scene", "epilogue"]
+        assert [c.cts_urn for c in chunks] == [
+            f"{PLAY_BASE}:PRO",
+            f"{PLAY_BASE}:1.1",
+            f"{PLAY_BASE}:EPI",
+        ]
+
+    def test_chunk_prev_next_thread_across_sibling_types(self, play_parser):
+        chunks = list(play_parser.chunks())
+        assert chunks[0].prev_urn is None
+        assert chunks[0].next_urn == f"{PLAY_BASE}:1.1"
+        assert chunks[1].prev_urn == f"{PLAY_BASE}:PRO"
+        assert chunks[1].next_urn == f"{PLAY_BASE}:EPI"
+        assert chunks[2].prev_urn == f"{PLAY_BASE}:1.1"
+        assert chunks[2].next_urn is None
+
+    def test_prologues_own_line_citestructure_still_resolves(self, play_parser):
+        """Prologue's nested "line" level (like act > scene > line) stays
+        usable for direct citation even though it isn't the chunk level."""
+        elem = play_parser.resolve(f"{PLAY_BASE}:PRO.1")
+        assert elem.text == "prologue line"
+
+
+class TestFlatLineSiblingIsNotAStructuralBranch:
+    """The extremely common card+line / scene+line pattern in this corpus
+    (see e.g. tlg0020.tlg001.perseus-grc2.xml) declares a "line"
+    citeStructure as a *root-level sibling* of the chunked branch, purely
+    to offer an alternate fine-grained citation path (resolve/generate),
+    not a structural division of the work. It must stay resolvable but
+    must not be walked as its own toc()/chunks() branch -- unlike an
+    actual div-type sibling (prologue/induction/etc., see
+    TestSiblingCiteStructures), it would otherwise flood both with one
+    entry per line."""
+
+    def test_chunks_do_not_include_line_level(self, drama_parser):
+        chunks = list(drama_parser.chunks())
+        assert [c.unit for c in chunks] == ["scene", "scene"]
+
+    def test_toc_does_not_include_line_level(self, drama_parser):
+        toc = drama_parser.toc()
+        assert [e["subtype"] for e in toc] == ["scene", "scene"]
+
+    def test_line_level_still_resolves_directly(self, drama_parser):
+        elem = drama_parser.resolve(f"{DRAMA_BASE}:3")
+        assert elem.text == "line three"
