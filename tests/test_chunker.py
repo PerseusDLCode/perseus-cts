@@ -88,6 +88,21 @@ class TestChunkerAutoDepthScheme:
         index = json.loads((output / "index.json").read_text())
         assert len(index["chunks"]) == 6
 
+    def test_index_and_metadata_carry_word_count_and_pct(self, tmp_path):
+        doc = LenientTEIDocument(write_xml(tmp_path, THUCYDIDES_XML))
+        chunker = Chunker(doc, chunk_unit="section")
+        output = tmp_path / "out"
+        chunker.compile(output)
+
+        metadata = json.loads((output / "metadata.json").read_text())
+        assert metadata["document"]["word_count"] == 6
+
+        index = json.loads((output / "index.json").read_text())
+        assert [c["word_count"] for c in index["chunks"]] == [1, 1, 1, 1, 1, 1]
+        for chunk in index["chunks"]:
+            assert chunk["pct"] == pytest.approx(100 / 6, abs=0.01)
+        assert sum(c["pct"] for c in index["chunks"]) == pytest.approx(100.0, abs=0.05)
+
     def test_unit_scheme_map_threads_through_to_toc(self, tmp_path):
         doc = LenientTEIDocument(write_xml(tmp_path, THUCYDIDES_XML))
         chunker = Chunker(doc, chunk_unit="section")

@@ -70,12 +70,14 @@ class CitationChunk:
     elements: list[etree._Element]
     prev_urn: str | None = None
     next_urn: str | None = None
+    word_count: int = 0
 
     def to_xml(self) -> etree._Element:
         root = etree.Element("citationChunk", nsmap={"tei": TEI_NS})
         root.set("unit", self.unit)
         root.set("base_urn", self.base_urn)
         root.set("cts_urn", self.cts_urn)
+        root.set("word_count", str(self.word_count))
         if self.prev_urn is not None:
             root.set("prev_urn", self.prev_urn)
         if self.next_urn is not None:

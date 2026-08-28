@@ -14,6 +14,7 @@ from perseus_cts.cts_resolver import (
     auto_chunk_units,
     available_refsDecl_ids,
     section_scheme_unit,
+    word_count,
 )
 
 TEI_NS = "http://www.tei-c.org/ns/1.0"
@@ -139,6 +140,38 @@ def test_first_level_dot_delim_raises(tmp_path):
     doc = LenientTEIDocument(write_xml(tmp_path, BAD_DELIM_XML))
     with pytest.raises(ConfigurationError, match="delim"):
         ReferenceParser(doc)
+
+
+class TestWordCount:
+    def test_counts_whitespace_delimited_tokens(self):
+        from lxml import etree
+
+        el = etree.fromstring("<p>one two three</p>")
+        assert word_count(el) == 3
+
+    def test_counts_nested_text(self):
+        from lxml import etree
+
+        el = etree.fromstring("<p>one <hi>two three</hi> four</p>")
+        assert word_count(el) == 4
+
+    def test_excludes_note_app_rdg_del(self):
+        from lxml import etree
+
+        el = etree.fromstring(
+            "<p>one two "
+            "<note>an editorial note with several words</note>"
+            "<app><rdg>alternate reading</rdg></app>"
+            "<del>deleted text</del>"
+            " three</p>"
+        )
+        assert word_count(el) == 3
+
+    def test_excluded_element_tail_still_counts(self):
+        from lxml import etree
+
+        el = etree.fromstring("<p>one <note>skip me</note> two</p>")
+        assert word_count(el) == 2
 
 
 class TestApologyConstructor:
@@ -401,6 +434,34 @@ class TestTOC:
         assert all(e["depth"] == 0 for e in result)
         assert all(e["subpassages"] == [] for e in result)
 
+    def test_word_count_and_pct_present_at_every_level(self, thucydides_parser):
+        # Each section div holds exactly one word, book 1 has 5 sections and
+        # book 2 has 1, for a document total of 6.
+        result = thucydides_parser.toc()
+        book1, book2 = result
+        assert book1["word_count"] == 5
+        assert book2["word_count"] == 1
+        assert book1["pct"] == pytest.approx(83.33, abs=0.01)
+        assert book2["pct"] == pytest.approx(16.67, abs=0.01)
+
+        chapter1, chapter2 = book1["subpassages"]
+        assert chapter1["word_count"] == 3
+        assert chapter2["word_count"] == 2
+        assert chapter1["pct"] == pytest.approx(50.0, abs=0.01)
+
+    def test_top_level_pct_sums_to_100(self, thucydides_parser):
+        # pct is always relative to the whole document, at every depth --
+        # so only top-level siblings (which partition the whole document)
+        # are guaranteed to sum to 100.
+        result = thucydides_parser.toc()
+        assert sum(e["pct"] for e in result) == pytest.approx(100.0, abs=0.01)
+
+    def test_child_pct_sums_to_parent_pct(self, thucydides_parser):
+        result = thucydides_parser.toc()
+        book1 = result[0]
+        child_total = sum(e["pct"] for e in book1["subpassages"])
+        assert child_total == pytest.approx(book1["pct"], abs=0.01)
+
     def test_toc_without_n_attr_uses_idx_for_label_not_urn(self, tmp_path):
         base = "urn:cts:greekLit:tlg0001.tlg001.test"
         xml = textwrap.dedent(f"""\
@@ -507,6 +568,13 @@ class TestChunksDivBased:
         result = list(apology_parser.chunks())
         assert len(result) == 3
         assert all(c.unit == "section" for c in result)
+
+    def test_chunk_word_count(self, thucydides_parser):
+        chunks = list(thucydides_parser.chunks())
+        assert [c.word_count for c in chunks] == [3, 2, 1]
+
+    def test_document_word_count(self, thucydides_parser):
+        assert thucydides_parser.document_word_count() == 6
 
     def test_n_chunk_attr_overrides_penultimate(self, tmp_path):
         xml = f"""\

@@ -54,6 +54,35 @@ def _match_local_name(match_expr: str) -> str:
     return last_step.split("[", 1)[0].strip()
 
 
+# Editorial apparatus that doesn't belong to the base text -- excluded from
+# word_count so a heavily-annotated passage's size isn't inflated relative
+# to a lightly-annotated one.
+_WORD_COUNT_EXCLUDE = {"note", "app", "rdg", "del"}
+
+
+def word_count(element: etree._Element) -> int:
+    """Return the number of whitespace-delimited word tokens in element's
+    text content, excluding editorial apparatus (note, app/rdg, del).
+
+    Recurses so that a node's count reflects everything beneath it -- a
+    book's count is its own full text, not a manual sum of its chapters --
+    which lets both TOC nodes (books, chapters, ...) and leaf chunks share
+    this one function."""
+    text_parts = [element.text or ""]
+    total = 0
+    for child in element:
+        if not isinstance(child.tag, str):
+            text_parts.append(child.tail or "")
+            continue
+        if etree.QName(child.tag).localname in _WORD_COUNT_EXCLUDE:
+            text_parts.append(child.tail or "")
+            continue
+        total += word_count(child)
+        text_parts.append(child.tail or "")
+    total += len("".join(text_parts).split())
+    return total
+
+
 def copy_before(
     element: etree._Element,
     stop: etree._Element | None,
@@ -520,6 +549,12 @@ class CTSResolver:
     def refsDecl_id(self) -> str:
         return self._refsDecl_id
 
+    def document_word_count(self) -> int:
+        """Return the word count of the whole document body, for computing
+        each passage's size as a % of the whole work (see toc() and
+        chunks())."""
+        return word_count(self._body)
+
     def citation_records(self, depth: int = -1) -> Iterator[CitationRecord]:
         """Yield CitationRecord objects at every citation level."""
         yield from self._records_recursive(
@@ -620,7 +655,8 @@ class CTSResolver:
             chunk_cs if self._branch_contains(cs, chunk_cs) else self._branch_chunk_cs(cs)
             for cs in branches
         }
-        return self._toc_level("", branches, self._body, 0, stop_cs, unit_scheme_map)
+        total = self.document_word_count()
+        return self._toc_level("", branches, self._body, 0, stop_cs, unit_scheme_map, total)
 
     def _toc_level(
         self,
@@ -630,6 +666,7 @@ class CTSResolver:
         depth: int,
         stop_cs: set[etree._Element],
         unit_scheme_map: dict[str, str] | None,
+        total_word_count: int,
     ) -> list[dict]:
         if not cs_list:
             return []
@@ -658,12 +695,20 @@ class CTSResolver:
                 new_suffix = suffix + delim + val
                 subpassages = (
                     self._toc_level(
-                        new_suffix, cs_children, cand, depth + 1, stop_cs, unit_scheme_map
+                        new_suffix,
+                        cs_children,
+                        cand,
+                        depth + 1,
+                        stop_cs,
+                        unit_scheme_map,
+                        total_word_count,
                     )
                     if cs_children and not stop_recursion
                     else []
                 )
                 label_val = val or str(idx)
+                wc = word_count(cand)
+                pct = round(100 * wc / total_word_count, 2) if total_word_count else 0.0
                 # Tragedy's "scene" divs (episode/choral/etc.) don't use @n for
                 # citation -- `use` above computes a line range instead -- so
                 # @n is free for an editor to hand-author an explicit display
@@ -681,6 +726,8 @@ class CTSResolver:
                     "label": explicit_label or f"{unit.capitalize()} {label_val}",
                     "subtype": unit,
                     "urn": self._base_urn + new_suffix,
+                    "word_count": wc,
+                    "pct": pct,
                     "subpassages": subpassages,
                 }
                 if unit_scheme_map is not None:
@@ -872,11 +919,13 @@ class CTSResolver:
         shape every other chunk (and _chunk_filename) expects, since there
         is exactly one chunk to number.
         """
+        elements = list(self._body)
         return CitationChunk(
             base_urn=self._base_urn,
             cts_urn=f"{self._base_urn}:1",
             unit=target_cs.get("unit", ""),
-            elements=list(self._body),
+            elements=elements,
+            word_count=sum(word_count(e) for e in elements),
         )
 
     def _find_chunk_cs(self) -> etree._Element:
@@ -962,6 +1011,7 @@ class CTSResolver:
                 elements=[elem],
                 prev_urn=pairs[i - 1][1] if i > 0 else None,
                 next_urn=pairs[i + 1][1] if i + 1 < len(pairs) else None,
+                word_count=word_count(elem),
             )
 
     def _milestone_chunks(self, target_cs: etree._Element) -> Iterator[CitationChunk]:
@@ -991,13 +1041,15 @@ class CTSResolver:
 
         for i, (ms, suffix) in enumerate(milestones):
             ms_next = milestones[i + 1][0] if i + 1 < len(milestones) else None
+            elements = elements_between(self._body, ms, ms_next)
             yield CitationChunk(
                 base_urn=self._base_urn,
                 cts_urn=_urn(suffix),
                 unit=unit,
-                elements=elements_between(self._body, ms, ms_next),
+                elements=elements,
                 prev_urn=_urn(milestones[i - 1][1]) if i > 0 else None,
                 next_urn=_urn(milestones[i + 1][1]) if i + 1 < len(milestones) else None,
+                word_count=sum(word_count(e) for e in elements),
             )
 
     def _milestone_contexts(

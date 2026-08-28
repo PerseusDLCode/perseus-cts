@@ -45,10 +45,23 @@ class Chunker:
         **kwargs,
     ):
         output_path.mkdir(parents=True, exist_ok=True)
+        total_word_count = self.cts_resolver.document_word_count()
         index_entries: list[dict] = []
         for chunk in self.citation_chunks:
             fname = self._chunk_filename(chunk)
-            index_entries.append({"file": fname, "cts_urn": chunk.cts_urn})
+            pct = (
+                round(100 * chunk.word_count / total_word_count, 2)
+                if total_word_count
+                else 0.0
+            )
+            index_entries.append(
+                {
+                    "file": fname,
+                    "cts_urn": chunk.cts_urn,
+                    "word_count": chunk.word_count,
+                    "pct": pct,
+                }
+            )
             (output_path / fname).write_bytes(
                 etree.tostring(
                     chunk.to_xml(),
@@ -65,7 +78,10 @@ class Chunker:
 
         metadata = {
             "version": "1",
-            "document": self._build_document_metadata(),
+            "document": {
+                **self._build_document_metadata(),
+                "word_count": total_word_count,
+            },
             "refsDecl_id": self.cts_resolver.refsDecl_id,
             "chunk_unit": self.citation_chunks[0].unit if self.citation_chunks else "",
             "toc": self.cts_resolver.toc(unit_scheme_map),
