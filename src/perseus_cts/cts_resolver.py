@@ -549,6 +549,23 @@ class CTSResolver:
     def refsDecl_id(self) -> str:
         return self._refsDecl_id
 
+    @property
+    def target_unit(self) -> str:
+        """The citation unit this resolver is configured to chunk at (an
+        explicit n="chunk" citeStructure, a chunk_unit override, or the
+        usual penultimate-level fallback -- see _find_chunk_cs).
+
+        Distinct from any individual CitationChunk's own .unit: a leaf
+        whose declared descendants don't actually exist in this document
+        (e.g. Livy's periochae, book-level summaries with no chapter/
+        section subdivisions) is chunked at its own shallower unit (see
+        _collect_cs_elements), but this resolver's target_unit still
+        reports the scheme's real, intended granularity (e.g. "chapter"),
+        which is what metadata like chunk_unit/unit_scheme_map should key
+        off instead of an arbitrary chunk instance's unit.
+        """
+        return self._find_chunk_cs().get("unit", "")
+
     def document_word_count(self) -> int:
         """Return the word count of the whole document body, for computing
         each passage's size as a % of the whole work (see toc() and
@@ -720,6 +737,17 @@ class CTSResolver:
                 # behavior, but keeping the override scoped to "scene" avoids
                 # any chance of it doing something unintended for those.
                 explicit_label = cand.get("n") if unit == "scene" else None
+                # A candidate whose own citeStructure declares children but
+                # which came back with no subpassages (e.g. one of Livy's
+                # periochae, a book-level summary with no chapter/section
+                # subdivisions -- see _collect_cs_elements's matching
+                # fallback in chunks()) is itself the leaf here, chunked at
+                # its own (shallower) unit. It should route to *this*
+                # resolver's own scheme -- self.target_unit, not its own
+                # "book" unit, which was never independently paginated --
+                # since that's the scheme chunks() actually produced a real
+                # chunk file for.
+                is_fallback_leaf = bool(cs_children) and not stop_recursion and not subpassages
                 entry = {
                     "depth": depth,
                     "index": idx,
@@ -731,7 +759,9 @@ class CTSResolver:
                     "subpassages": subpassages,
                 }
                 if unit_scheme_map is not None:
-                    entry["scheme"] = unit_scheme_map.get(unit)
+                    entry["scheme"] = unit_scheme_map.get(
+                        self.target_unit if is_fallback_leaf else unit
+                    )
                 tagged_entries.append((cand, entry))
 
         if len(cs_list) > 1:
@@ -1001,9 +1031,8 @@ class CTSResolver:
         return path[-2]
 
     def _div_chunks(self, target_cs: etree._Element) -> Iterator[CitationChunk]:
-        unit = target_cs.get("unit", "")
         pairs = self._candidates_at_level(target_cs)
-        for i, (elem, urn) in enumerate(pairs):
+        for i, (elem, urn, unit) in enumerate(pairs):
             yield CitationChunk(
                 base_urn=urn.rsplit(":", 1)[0],
                 cts_urn=urn,
@@ -1093,8 +1122,8 @@ class CTSResolver:
     def _candidates_at_level(
         self,
         target_cs: etree._Element,
-    ) -> list[tuple[etree._Element, str]]:
-        result: list[tuple[etree._Element, str]] = []
+    ) -> list[tuple[etree._Element, str, str]]:
+        result: list[tuple[etree._Element, str, str]] = []
         self._collect_cs_elements(
             "",
             cast(
@@ -1113,12 +1142,42 @@ class CTSResolver:
         cs_list: list[etree._Element],
         context: etree._Element,
         target_cs: etree._Element,
-        result: list[tuple[etree._Element, str]],
+        result: list[tuple[etree._Element, str, str]],
     ) -> None:
+        """Collect (element, urn, unit) triples at target_cs's level.
+
+        A node whose citeStructure declares children (e.g. a book
+        declaring nested chapters) normally gets walked into rather than
+        collected itself. But some elements matching an *ancestor* level
+        don't actually have any descendants matching the declared child
+        level -- e.g. Livy's periochae, book-level summaries sitting at
+        the same tree depth as fully chaptered books but with no
+        chapter/section subdivisions at all. Recursing into those finds
+        nothing, so without a fallback they'd silently vanish from
+        chunks()/toc() instead of being citable at their own (shallower)
+        unit. The before/after length check detects exactly that case:
+        the recursive call found zero real candidates anywhere beneath
+        it, so this node is treated as a leaf at its own unit instead.
+        """
         for node in self._walk_cs(suffix, cs_list, context):
             if node.cs is target_cs:
-                result.append((node.element, self._base_urn + node.suffix))
+                result.append((node.element, self._base_urn + node.suffix, node.unit))
             elif node.children:
+                before = len(result)
                 self._collect_cs_elements(
                     node.suffix, node.children, node.element, target_cs, result
                 )
+                # Only fall back to node itself when target_cs is actually
+                # reachable beneath node.cs in the *schema* (e.g. book ->
+                # chapter, when target_cs is chapter or deeper). Without
+                # this guard, a structurally unrelated sibling branch that
+                # legitimately never leads to target_cs at all -- e.g. a
+                # play's "prologue" branch when target_cs is "scene",
+                # nested only under "act" -- would also come back with
+                # zero results and wrongly be collected as a leaf.
+                if len(result) == before and self._branch_contains(
+                    node.cs, target_cs
+                ):
+                    result.append(
+                        (node.element, self._base_urn + node.suffix, node.unit)
+                    )

@@ -83,7 +83,7 @@ class Chunker:
                 "word_count": total_word_count,
             },
             "refsDecl_id": self.cts_resolver.refsDecl_id,
-            "chunk_unit": self.citation_chunks[0].unit if self.citation_chunks else "",
+            "chunk_unit": self.cts_resolver.target_unit,
             "toc": self.cts_resolver.toc(unit_scheme_map),
         }
         (output_path / "metadata.json").write_text(
