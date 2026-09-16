@@ -134,6 +134,50 @@ class TestCTSCatalogConstruction:
         with pytest.raises(FileNotFoundError):
             CTSCatalog([tmp_path, tmp_path / "nonexistent"])
 
+    def test_same_work_urn_in_two_roots_merges_versions(self, tmp_path):
+        """A work declared in two corpora (e.g. grcnewxml layering extra
+        editions/translations onto canonical-greekLit) must have its
+        versions merged, not have one corpus's declaration silently
+        overwrite the other's -- regardless of which root sorts last.
+        """
+        greek = tmp_path / "greekLit"
+        extra = tmp_path / "grcnewxml"
+        greek.mkdir()
+        extra.mkdir()
+        write_cts(greek, "tlg0012", "tlg001", "__cts__.xml", content=WORK_CTS)
+
+        extra_work = textwrap.dedent("""\
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ti:work xmlns:ti="http://chs.harvard.edu/xmlns/cts"
+                     groupUrn="urn:cts:greekLit:tlg0012"
+                     urn="urn:cts:greekLit:tlg0012.tlg001"
+                     xml:lang="grc">
+              <ti:title xml:lang="grc">Ἰλιάς</ti:title>
+              <ti:edition urn="urn:cts:greekLit:tlg0012.tlg001.brunck1810-grc2"
+                          workUrn="urn:cts:greekLit:tlg0012.tlg001" xml:lang="grc">
+                <ti:label xml:lang="eng">Brunck's edition</ti:label>
+                <ti:description xml:lang="eng">An extra edition.</ti:description>
+              </ti:edition>
+            </ti:work>
+        """)
+        write_cts(extra, "tlg0012", "tlg001", "__cts__.xml", content=extra_work)
+
+        # "grcnewxml" sorts after "greekLit" -- exercise both processing
+        # orders to make sure neither one loses data.
+        for roots in (
+            [greek, extra],
+            [extra, greek],
+        ):
+            catalog = CTSCatalog(roots)
+            work = catalog.works["urn:cts:greekLit:tlg0012.tlg001"]
+            urns = {v.urn for v in work.versions}
+            assert "urn:cts:greekLit:tlg0012.tlg001.perseus-grc2" in urns
+            assert "urn:cts:greekLit:tlg0012.tlg001.brunck1810-grc2" in urns
+            assert len(work.versions) == 4  # 3 from WORK_CTS + 1 extra
+            # titles from both declarations are preserved
+            assert work.titles.get("eng") == "Iliad"
+            assert work.titles.get("grc") == "Ἰλιάς"
+
 
 # ---------------------------------------------------------------------------
 # Group-level parsing

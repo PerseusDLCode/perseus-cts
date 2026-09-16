@@ -151,22 +151,37 @@ class CTSCatalog:
             genre_el.get("confidence", "") if genre_el is not None else None
         )
 
-        work = CTSWork(
-            urn=urn,
-            group_urn=group_urn,
-            titles=titles,
-            versions=versions,
-            genre=genre,
-            genre_confidence=genre_confidence,
-            source_path=source_path,
-        )
-        self._works[urn] = work
+        # Two different corpus roots can legitimately declare __cts__.xml for
+        # the *same* work urn (e.g. grcnewxml layers extra editions/
+        # translations onto a work canonical-greekLit already declares).
+        # Whichever root happens to sort/process last must not silently wipe
+        # out the other's versions, so merge into the existing CTSWork
+        # in place instead of replacing it outright.
+        existing = self._works.get(urn)
+        if existing is not None:
+            existing.titles = {**existing.titles, **titles}
+            known_urns = {v.urn for v in existing.versions}
+            existing.versions.extend(v for v in versions if v.urn not in known_urns)
+            if existing.genre is None and genre is not None:
+                existing.genre = genre
+                existing.genre_confidence = genre_confidence
+            work = existing
+        else:
+            work = CTSWork(
+                urn=urn,
+                group_urn=group_urn,
+                titles=titles,
+                versions=versions,
+                genre=genre,
+                genre_confidence=genre_confidence,
+                source_path=source_path,
+            )
+            self._works[urn] = work
+            if group_urn in self._groups:
+                self._groups[group_urn].works.append(work)
 
         for v in versions:
             self._versions[v.urn] = v
-
-        if group_urn in self._groups:
-            self._groups[group_urn].works.append(work)
 
     def _parse_version(
         self,
