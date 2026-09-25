@@ -198,4 +198,61 @@ class Chunker:
             "pub_place": pub_place,
             "pub_date": pub_date,
             "about": self._catalog_about(),
+            **self._build_publication_metadata(),
+        }
+
+    def _build_publication_metadata(self) -> dict:
+        """Extract the electronic edition's funding and publication statement.
+
+        Unlike pub_place/pub_date above (which describe the printed source
+        when there is one), these come from the TEI header's own
+        titleStmt/editionStmt and publicationStmt, so readers can see who
+        funded, sponsored, published, and licensed this digital text.
+        """
+        NS = {"tei": TEI_NS}
+        file_desc = self.tei_doc.root.find(".//tei:teiHeader/tei:fileDesc", NS)
+        if file_desc is None:
+            return {"funders": [], "sponsors": [], "publication": None}
+
+        def text(el: etree._Element | None) -> str:
+            return " ".join("".join(el.itertext()).split()) if el is not None else ""
+
+        def texts(*paths: str) -> list[str]:
+            # dict.fromkeys dedupes while keeping document order.
+            found = (text(el) for path in paths for el in file_desc.findall(path, NS))
+            return list(dict.fromkeys(t for t in found if t))
+
+        funders = texts("tei:titleStmt/tei:funder", "tei:editionStmt/tei:funder")
+        sponsors = texts("tei:titleStmt/tei:sponsor", "tei:editionStmt/tei:sponsor")
+
+        pub_stmt = file_desc.find("tei:publicationStmt", NS)
+        if pub_stmt is None:
+            return {"funders": funders, "sponsors": sponsors, "publication": None}
+
+        def joined(tag: str) -> str:
+            return "; ".join(
+                t for t in (text(el) for el in pub_stmt.findall(tag, NS)) if t
+            )
+
+        licence_el = pub_stmt.find("tei:availability/tei:licence", NS)
+        licence = (
+            {"text": text(licence_el), "target": licence_el.get("target", "")}
+            if licence_el is not None
+            else None
+        )
+        availability = " ".join(
+            t for t in (text(p) for p in pub_stmt.findall("tei:availability/tei:p", NS)) if t
+        )
+
+        return {
+            "funders": funders,
+            "sponsors": sponsors,
+            "publication": {
+                "publisher": joined("tei:publisher"),
+                "pub_place": joined("tei:pubPlace"),
+                "authority": joined("tei:authority"),
+                "date": text(pub_stmt.find("tei:date", NS)),
+                "licence": licence,
+                "availability": availability,
+            },
         }

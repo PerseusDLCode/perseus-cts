@@ -186,3 +186,71 @@ class TestChunkerCatalogAbout:
         chunker.compile(tmp_path)
         metadata = json.loads((tmp_path / "metadata.json").read_text())
         assert metadata["document"]["about"] is None
+
+
+class TestChunkerPublicationMetadata:
+    """Funding and publication statements come from the TEI header's own
+    titleStmt/editionStmt and publicationStmt, not the printed source."""
+
+    def test_reads_funders_sponsors_and_publication_stmt(
+        self, trachiniae_doc, tmp_path
+    ):
+        chunker = Chunker(trachiniae_doc)
+        chunker.compile(tmp_path)
+        document = json.loads((tmp_path / "metadata.json").read_text())["document"]
+        assert document["funders"] == ["The Annenberg CPB/Project"]
+        assert document["sponsors"] == ["Perseus Project, Tufts University"]
+        assert document["publication"] == {
+            "publisher": "Trustees of Tufts University",
+            "pub_place": "Medford, MA",
+            "authority": "Perseus Project",
+            "date": "",
+            "licence": None,
+            "availability": "",
+        }
+        # The printed source's imprint still drives pub_place/pub_date.
+        assert document["pub_place"] == "London"
+
+    def test_reads_licence_and_edition_stmt_funders(self, tmp_path):
+        xml = TRACHINIAE_PATH.read_text(encoding="utf-8").replace(
+            "<extent>",
+            "<editionStmt><edition>Electronic edition</edition>"
+            "<funder>Google Digital Humanities Awards Program</funder>"
+            "<funder>The Annenberg CPB/Project</funder></editionStmt><extent>",
+            1,
+        ).replace(
+            "<authority>Perseus Project</authority>",
+            "<authority>Perseus Project</authority>"
+            '<date type="release">2011-03-14</date>'
+            "<availability><licence target=\"https://creativecommons.org/licenses/by-sa/4.0/\">"
+            "Available under a Creative Commons\n    Attribution-ShareAlike 4.0 International License"
+            "</licence></availability>",
+            1,
+        )
+        path = tmp_path / "tlg0011.tlg001.perseus-grc2.xml"
+        path.write_text(xml, encoding="utf-8")
+        chunker = Chunker(LenientTEIDocument(path))
+        chunker.compile(tmp_path / "out")
+        document = json.loads((tmp_path / "out" / "metadata.json").read_text())[
+            "document"
+        ]
+        assert document["funders"] == [
+            "The Annenberg CPB/Project",
+            "Google Digital Humanities Awards Program",
+        ]
+        assert document["publication"]["date"] == "2011-03-14"
+        assert document["publication"]["licence"] == {
+            "text": "Available under a Creative Commons Attribution-ShareAlike 4.0 International License",
+            "target": "https://creativecommons.org/licenses/by-sa/4.0/",
+        }
+
+    def test_missing_file_desc(self, tmp_path):
+        doc = LenientTEIDocument(write_xml(tmp_path, THUCYDIDES_XML))
+        chunker = Chunker(doc, chunk_unit="section")
+        chunker.compile(tmp_path / "out")
+        document = json.loads((tmp_path / "out" / "metadata.json").read_text())[
+            "document"
+        ]
+        assert document["funders"] == []
+        assert document["sponsors"] == []
+        assert document["publication"] is None
