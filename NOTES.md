@@ -117,6 +117,21 @@ and need to know its citable address.
 These two operations should be inverses: `resolve(generate(e)) is e` and
 `generate(resolve(u)) == u`. The test suite verifies this.
 
+**`@use` may be any XPath** (added 2026-09-29). A plain attribute (`@n`)
+is read directly; anything else is evaluated with the candidate element as
+context, bare element names prefixed as in `@match`, and a numeric result
+written without a trailing `.0`. Every reader of `@use` goes through
+`_use()`, so resolve, generate, citations, TOC and milestone chunks agree.
+Before this, a non-attribute `@use` generated empty values and never
+resolved. The case that forced it: ShakeDraCor editions carry the Folger
+Through-Line-Number only in `@xml:id` (`ftln-0034`), and are cited by it
+through `use="string(number(substring-after(@xml:id, 'ftln-')))"`.
+
+**Axes in `@match` are not prefixed.** `_prefix_match_expr` skips a name
+preceded by `:`, so in `ancestor::div` the `div` stays unprefixed and
+matches nothing in a TEI document. Write paths without axes (`sp//milestone`
+rather than `.//milestone[not(ancestor::div[...])]`) until this is fixed.
+
 ### `toc` — the navigational hierarchy
 
 `toc()` returns the full citation tree as nested dicts — suitable for

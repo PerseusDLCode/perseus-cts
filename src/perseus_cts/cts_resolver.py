@@ -14,6 +14,7 @@ from perseus_cts.models.document import LenientTEIDocument
 
 
 _QUOTE = re.compile(r'(["\'][^"\']*["\'])')
+_PLAIN_ATTR = re.compile(r'@[A-Za-z_][A-Za-z0-9_.\-]*')
 _BARE_ELEMENT = re.compile(r'(?<![:\w@])([A-Za-z_][A-Za-z0-9_\-]*)(?![\w\-:(])')
 
 
@@ -133,6 +134,29 @@ class CTSResolver:
                     f"must be ':' (CTS passage separator)"
                 )
 
+    def _use(self, cs: etree._Element, element: etree._Element) -> str:
+        """The citation value of element under cs: its @use, which is either a
+        plain attribute (@n) or any XPath evaluated with element as context
+        (e.g. a Folger TLN computed from @xml:id). Bare element names are
+        prefixed as in @match."""
+        use_expr = cs.get("use", "@n")
+        if _PLAIN_ATTR.fullmatch(use_expr):
+            return element.get(use_expr[1:], "")
+        result = element.xpath(
+            _prefix_match_expr(use_expr, self._doc_prefix),
+            namespaces=self._ns_map,
+        )
+        if isinstance(result, list):
+            if not result:
+                return ""
+            first = result[0]
+            return first.xpath("string()") if isinstance(first, etree._Element) else str(first)
+        if isinstance(result, float):
+            return str(int(result)) if result.is_integer() else str(result)
+        if isinstance(result, bool):
+            return "true" if result else "false"
+        return str(result)
+
     def _match(self, expr: str, context: etree._Element) -> list:
         """Evaluate a citeStructure match expression against context."""
         return context.xpath(
@@ -199,13 +223,9 @@ class CTSResolver:
         use_attr = cs.get("use", "@n")
         candidates: list[etree._Element] = self._match(match_expr, context)
 
-        matched: Optional[etree._Element] = None
-        if use_attr.startswith("@"):
-            attr_name = use_attr[1:]
-            for cand in candidates:
-                if cand.get(attr_name) == token:
-                    matched = cand
-                    break
+        matched: Optional[etree._Element] = next(
+            (cand for cand in candidates if self._use(cs, cand) == token), None
+        )
 
         if matched is None:
             raise CitationError(
@@ -236,9 +256,7 @@ class CTSResolver:
                 raise ConfigurationError(
                     f"<citeStructure unit={cs.get('unit')!r}> is missing required @delim"
                 )
-            use_attr = cs.get("use", "@n")
-            val = elem.get(use_attr[1:], "") if use_attr.startswith("@") else ""
-            parts.append(delim + val)
+            parts.append(delim + self._use(cs, elem))
         return self._base_urn + "".join(parts)
 
     def _find_path_to(
@@ -280,13 +298,12 @@ class CTSResolver:
         """Shared traversal primitive for records, toc, and chunk collection."""
         for cs in cs_list:
             match_expr = cs.get("match", "")
-            use_attr = cs.get("use", "@n")
             delim = cs.get("delim", ":")
             unit = cs.get("unit", "")
             children = cs.xpath("tei:citeStructure", namespaces=NS)
             candidates: list[etree._Element] = self._match(match_expr, context)
             for cand in candidates:
-                val = cand.get(use_attr[1:], "") if use_attr.startswith("@") else ""
+                val = self._use(cs, cand)
                 yield _CSNode(
                     cs=cs,
                     element=cand,
@@ -420,15 +437,13 @@ class CTSResolver:
 
     def _milestone_chunks(self, target_cs: etree._Element) -> Iterator[CitationChunk]:
         match_expr = target_cs.get("match", "")
-        use_attr = target_cs.get("use", "@n")
         unit = target_cs.get("unit", "")
         delim = target_cs.get("delim", " ")
 
         milestones: list[etree._Element] = self._match(match_expr, self._body)
 
         def _urn(ms: etree._Element) -> str:
-            val = ms.get(use_attr[1:], "") if use_attr.startswith("@") else ""
-            return self._base_urn + delim + val
+            return self._base_urn + delim + self._use(target_cs, ms)
 
         for i, ms in enumerate(milestones):
             ms_next = milestones[i + 1] if i + 1 < len(milestones) else None
