@@ -579,3 +579,122 @@ class TestChunksMilestoneBased:
         assert divs0[0][0].text == "card 1 content"
         divs1 = [e for e in chunks[1].elements if _etree.QName(e.tag).localname == "div"]
         assert divs1[0][0].text == "card 2 content"
+
+
+# --- computed @use: a citation value that is not a plain attribute ----------
+
+TLN_BASE = "urn:cts:engLit:shakespeare.lr.f1"
+
+# The shape of a ShakeDraCor play: the Folger Through-Line-Number lives only
+# in @xml:id ("ftln-0034"), on <l> for verse and on <lb> for prose.
+TLN_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS-tln">
+            <citeStructure match="/TEI/text/body" use="@xml:base">
+              <citeStructure unit="line" delim=":"
+                  match=".//l[starts-with(@xml:id, 'ftln-')] | .//lb[starts-with(@xml:id, 'ftln-')]"
+                  use="string(number(substring-after(@xml:id, 'ftln-')))"/>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{TLN_BASE}">
+          <div type="act" n="1"><div type="scene" n="1">
+            <sp><p><lb xml:id="ftln-0001" n="1"/>I thought the king had more
+              <lb xml:id="ftln-0002" n="2"/>affected the Duke of Albany.</p></sp>
+            <sp><l xml:id="ftln-0034" n="34">Attend the lords of France and Burgundy,</l></sp>
+          </div></div>
+        </body>
+      </text>
+    </TEI>
+"""
+
+
+@pytest.fixture
+def tln_parser(tmp_path):
+    return ReferenceParser(LenientTEIDocument(write_xml(tmp_path, TLN_XML)), refsDecl_id="CTS-tln")
+
+
+class TestComputedUse:
+    def test_resolves_a_verse_line_by_its_tln(self, tln_parser):
+        el = tln_parser.resolve(f"{TLN_BASE}:34")
+        assert el.tag == f"{{{TEI_NS}}}l" and el.get("n") == "34"
+
+    def test_resolves_a_prose_line_by_its_tln(self, tln_parser):
+        el = tln_parser.resolve(f"{TLN_BASE}:2")
+        assert el.tag == f"{{{TEI_NS}}}lb"
+
+    def test_leading_zeros_are_not_part_of_the_value(self, tln_parser):
+        with pytest.raises(CitationError):
+            tln_parser.resolve(f"{TLN_BASE}:0034")
+
+    def test_generates_the_tln_urn(self, tln_parser):
+        el = tln_parser.resolve(f"{TLN_BASE}:34")
+        assert tln_parser.generate(el) == f"{TLN_BASE}:34"
+
+    def test_citations_carry_computed_values(self, tln_parser):
+        assert list(tln_parser.citations()) == [f"{TLN_BASE}:1", f"{TLN_BASE}:2", f"{TLN_BASE}:34"]
+
+    def test_plain_attribute_with_a_namespace_prefix(self, tmp_path):
+        xml = TLN_XML.replace("use=\"string(number(substring-after(@xml:id, 'ftln-')))\"", 'use="@xml:id"')
+        parser = ReferenceParser(LenientTEIDocument(write_xml(tmp_path, xml)), refsDecl_id="CTS-tln")
+        assert parser.resolve(f"{TLN_BASE}:ftln-0034").get("n") == "34"
+
+
+GLOBE_BASE = "urn:cts:engLit:shakespeare.h5.globe"
+
+# The shape of a regenerated Globe play: a line is a point, the milestone at
+# its start; an act-level prologue has lines but no scene.
+GLOBE_XML = f"""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <TEI xmlns="http://www.tei-c.org/ns/1.0">
+      <teiHeader>
+        <encodingDesc>
+          <refsDecl xml:id="CTS">
+            <citeStructure match="/TEI/text/body" use="@xml:base">
+              <citeStructure unit="act" delim=":" match="div[@type='act'][@n != 'cast']" use="@n">
+                <citeStructure unit="scene" delim="." match="div[@type='scene']" use="@n" n="chunk">
+                  <citeStructure unit="line" delim="." match=".//milestone[@unit='line'][@ed='Globe']" use="@n"/>
+                </citeStructure>
+                <citeStructure unit="line" delim="." match="sp//milestone[@unit='line'][@ed='Globe']" use="@n"/>
+              </citeStructure>
+            </citeStructure>
+          </refsDecl>
+        </encodingDesc>
+      </teiHeader>
+      <text>
+        <body xml:base="{GLOBE_BASE}">
+          <div type="act" n="cast"><castList/></div>
+          <div type="act" n="prologue">
+            <sp><l><milestone unit="line" ed="Globe" n="1"/>O for a Muse of fire,</l></sp>
+          </div>
+          <div type="act" n="1"><div type="scene" n="1">
+            <sp><l><milestone unit="line" ed="Globe" n="1"/>My lord, I'll tell you;</l></sp>
+          </div></div>
+        </body>
+      </text>
+    </TEI>
+"""
+
+
+@pytest.fixture
+def globe_parser(tmp_path):
+    return ReferenceParser(LenientTEIDocument(write_xml(tmp_path, GLOBE_XML)))
+
+
+class TestMilestoneLines:
+    def test_a_scene_line_resolves_to_its_milestone(self, globe_parser):
+        assert "My lord" in globe_parser.resolve(f"{GLOBE_BASE}:1.1.1").tail
+
+    def test_an_act_level_line_resolves_without_a_scene(self, globe_parser):
+        assert "Muse of fire" in globe_parser.resolve(f"{GLOBE_BASE}:prologue.1").tail
+
+    def test_citations_exclude_the_cast_list_and_do_not_double_count(self, globe_parser):
+        assert list(globe_parser.citations()) == [
+            f"{GLOBE_BASE}:prologue", f"{GLOBE_BASE}:prologue.1",
+            f"{GLOBE_BASE}:1", f"{GLOBE_BASE}:1.1", f"{GLOBE_BASE}:1.1.1",
+        ]
