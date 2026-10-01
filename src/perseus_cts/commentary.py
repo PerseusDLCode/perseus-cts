@@ -31,14 +31,26 @@ _SEGMENT = re.compile(r"^(\d*)(.*)$")
 _LINE_REF_DIV_TYPES = frozenset({"commline"})
 
 
-def _parse_segment(segment: str) -> tuple[int, str]:
+# Sorts after any real letter suffix, so a bare number as a range *end* spans
+# its lettered sub-passages (Stephanus "327" covers 327A..327E).
+_SUFFIX_MAX = "￿"
+
+
+def _parse_segment(segment: str, *, upper: bool = False) -> tuple[int, str]:
     match = _SEGMENT.match(segment)
     digits, rest = match.groups() if match else ("", segment)
-    return (int(digits), rest) if digits else (-1, rest)
+    if not digits:
+        return (-1, rest.casefold())
+    return (int(digits), rest.casefold() or (_SUFFIX_MAX if upper else ""))
 
 
-def _parse_ref(ref: str) -> tuple[tuple[int, str], ...]:
-    return tuple(_parse_segment(part) for part in ref.split("."))
+def _parse_ref(ref: str, *, upper: bool = False) -> tuple[tuple[int, str], ...]:
+    parts = ref.split(".")
+    last = len(parts) - 1
+    return tuple(
+        _parse_segment(part, upper=upper and i == last)
+        for i, part in enumerate(parts)
+    )
 
 
 def _parse_range(citation: str) -> tuple[str, str]:
@@ -52,9 +64,9 @@ def ranges_overlap(a: str, b: str) -> bool:
         return False
     a_start, a_end = _parse_range(a)
     b_start, b_end = _parse_range(b)
-    return _parse_ref(a_start) <= _parse_ref(b_end) and _parse_ref(
+    return _parse_ref(a_start) <= _parse_ref(b_end, upper=True) and _parse_ref(
         b_start
-    ) <= _parse_ref(a_end)
+    ) <= _parse_ref(a_end, upper=True)
 
 
 def _urns_overlap(a: str, b: str) -> bool:

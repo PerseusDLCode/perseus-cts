@@ -128,6 +128,17 @@ class TestRangesOverlap:
     def test_dotted_refs_do_not_overlap(self):
         assert not ranges_overlap("1.332B", "1.332C")
 
+    def test_lettered_ref_overlaps_bare_number(self):
+        assert ranges_overlap("1.327A", "1.327")
+        assert ranges_overlap("1.327", "1.327C")
+
+    def test_lettered_ref_does_not_overlap_other_number(self):
+        assert not ranges_overlap("1.328A", "1.327")
+        assert not ranges_overlap("1.327", "1.326E")
+
+    def test_letter_suffix_is_case_insensitive(self):
+        assert ranges_overlap("1.327a", "1.327A")
+
     def test_empty_ref_never_overlaps(self):
         assert not ranges_overlap("", "497")
         assert not ranges_overlap("497", "")
